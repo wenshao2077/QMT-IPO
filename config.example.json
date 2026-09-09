@@ -1,0 +1,10 @@
+{
+  "account_id": "YOUR_ACCOUNT",
+  "qmt_userdata": "D:/东北证券NET专业版/userdata_mini",
+  "state_dir": "C:/Users/77184/qmt-ipo-v2/runtime",
+  "control_dir": "C:/Users/77184/qmt-ipo-v3/runtime",
+  "webhook_file": "C:/Users/77184/qmt-ipo-v2/secure/webhook.txt",
+  "holiday_file": "C:/Users/77184/quant-push/market_closed_dates.txt",
+  "allowed_markets": ["SH", "SZ"],
+  "enable_execution": false
+}

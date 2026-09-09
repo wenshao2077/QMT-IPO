@@ -1,0 +1,47 @@
+# Local environments and generated artifacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Real account configuration and credentials: example only is versioned
+config.json
+config.*.json
+!config.example.json
+*.local.json
+qa*.json
+.env
+.env.*
+secure/
+webhook*.txt
+*.pem
+*.key
+.c2c*
+
+# Runtime / state / receipts / backups must stay on the execution host
+runtime/
+qa-*/
+backups/
+staging*/
+*.sqlite*
+*.db
+*.db-*
+*.log
+*.zip
+*.lnk
+*.tmp
+*.partial
+*.update
+*.new
+*.bak
+
+# Editor and OS residue
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

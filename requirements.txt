@@ -1,0 +1,4 @@
+# Verified Windows / Python 3.11 runtime. Tkinter is provided by Python itself.
+xtquant==250807.1.2
+numpy==1.26.4
+pandas==2.2.3
