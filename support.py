@@ -116,6 +116,9 @@ class Store:
                 id TEXT PRIMARY KEY, content TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0,
                 attempts INTEGER NOT NULL DEFAULT 0, due REAL NOT NULL DEFAULT 0,
                 error TEXT NOT NULL DEFAULT '');
+            CREATE TABLE IF NOT EXISTS notification_suppressions (
+                id TEXT PRIMARY KEY, reason TEXT NOT NULL, suppressed_at REAL NOT NULL,
+                calendar_source TEXT NOT NULL);
         ''')
 
     def close(self):
@@ -172,13 +175,13 @@ class Store:
                                (account,)).fetchall()
 
     def pending_notifications(self):
-        return self.db.execute('SELECT COUNT(*) FROM outbox WHERE delivered=0').fetchone()[0]
+        return self.db.execute('SELECT COUNT(*) FROM outbox WHERE delivered=0 AND id NOT IN (SELECT id FROM notification_suppressions)').fetchone()[0]
 
     def drain(self, send, now=time.time, sleep=time.sleep, limit=15):
         """Durable at-least-once delivery. A lost HTTP response can repeat a message,
         but never an order. Stable event IDs allow identifying repeated notices.
         """
-        rows = self.db.execute('SELECT * FROM outbox WHERE delivered=0 ORDER BY rowid LIMIT ?',
+        rows = self.db.execute('SELECT * FROM outbox WHERE delivered=0 AND id NOT IN (SELECT id FROM notification_suppressions) ORDER BY rowid LIMIT ?',
                                (limit,)).fetchall()
         for index, row in enumerate(rows):
             if row['due'] > now():

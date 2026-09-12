@@ -8,13 +8,14 @@ $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=[Text.Encoding]::UTF8
 $newNames=@('QmtIPO3-Cycle','QmtIPO3-Notify','QmtIPO3-Monitor','QmtIPO3-Backup')
-$oldNames=@('QmtIPO-Preview','QmtIPO-Reconcile','QmtIPO-Notify','QmtIPO-Health','QmtIPO-Backup')
+$oldNames=@() # Never manage another/legacy installation by a name wildcard.
 $allNames=$newNames+$oldNames
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $sid=$identity.User
 $admin=([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 $configPath=Join-Path $Root 'config.json'
-$control=Join-Path $Root 'runtime'
+$control=(Get-Content -LiteralPath $configPath -Raw -Encoding UTF8|ConvertFrom-Json).control_dir
+. (Join-Path $Root 'task_identity.ps1')
 $scheduler=New-Object -ComObject Schedule.Service
 $scheduler.Connect()
 $folder=$scheduler.GetFolder('\')
@@ -23,7 +24,11 @@ function Get-OwnedTasks {
     $result=@{}
     foreach($name in $allNames){
         $task=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-        if($task){$result[$name]=$task}
+        if($task){
+            $action=@{'QmtIPO3-Cycle'='cycle';'QmtIPO3-Notify'='notify';'QmtIPO3-Monitor'='monitor';'QmtIPO3-Backup'='backup'}[$name]
+            Assert-IpoOwnedTask $task $Root $action
+            $result[$name]=$task
+        }
     }
     return $result
 }
@@ -65,7 +70,7 @@ function Save-JsonAtomic([string]$Path,$Value) {
 }
 
 function Grant-OwnerTaskAccess([string]$Name) {
-    # Only the nine exact project task names, never a folder-wide ACL.
+    # Only exact entrypoint-verified tasks for THIS root; never folder-wide ACLs.
     if($Name -notin $allNames){throw 'Task is outside this application'}
     $task=$folder.GetTask($Name)
     $descriptor=[Security.AccessControl.RawSecurityDescriptor]::new($task.GetSecurityDescriptor(7))
@@ -81,6 +86,7 @@ $receiptPath=$null
 $mutex=$null
 $locked=$false
 try {
+    if($Operation -ne 'Snapshot' -and (Test-Path -LiteralPath (Join-Path $Root 'maintenance.json'))){throw 'Maintenance in progress; no control changes permitted'}
     if($Operation -eq 'Snapshot'){Get-PanelSnapshot|ConvertTo-Json -Depth 12 -Compress;exit 0}
     if($RequestId -notmatch '^[a-f0-9]{32}$'){throw 'Invalid operation request ID'}
     if($Operation -in @('Enable','Pause') -and -not $Consent){throw 'Human button confirmation is required'}
@@ -110,12 +116,9 @@ try {
     }else{
         if($before.needs_admin){throw 'Task permissions need preparation before this action'}
         if($Operation -eq 'Enable'){
-            # Existing registered definitions are not recreated; ownership ACLs stay intact.
-            foreach($name in $newNames){
-                $task=$tasks[$name]
-                $expected=([IO.Path]::GetFullPath((Join-Path $Root 'run_scheduled.ps1'))).Replace([char]92,[char]47)
-                if($task.Actions.Count -ne 1 -or -not ($task.Actions[0].Arguments.Replace([char]92,[char]47)).Contains($expected)){throw 'Unexpected task entrypoint'}
-            }
+            # Configuration check has no network, SDK connection or message send.
+            & (Join-Path $Root '.venv/Scripts/python.exe') -B (Join-Path $Root 'code/diagnostics.py') check --config $configPath | Out-Null
+            if($LASTEXITCODE -ne 0){throw 'Configuration validation failed; use the validation button and resolve issues before authorization'}
             $backup=Join-Path $control ('panel-actions/'+$RequestId+'-config.before.json')
             [IO.File]::WriteAllText($backup,$configBefore,[Text.UTF8Encoding]::new($false))
             $config.enable_execution=$true

@@ -2,6 +2,7 @@
 from datetime import datetime
 from pathlib import Path
 import json
+import zipfile
 
 ACTION_NAMES={'cycle':'自动申购','notify':'通知补发','monitor':'运行监控','backup':'账本备份'}
 ISSUES={'daily_work_incomplete':'当日有未完成项目','daily_run_missing':'当日任务漏跑',
@@ -10,9 +11,7 @@ ISSUES={'daily_work_incomplete':'当日有未完成项目','daily_run_missing':'
 
 
 def item_reason(code,item):
-    if item.get('status')=='SKIPPED_SCOPE' and code.endswith('.BJ'):
-        return '北交所无权限，已跳过'
-    return item.get('reason','')
+    return item.get('reason','') or ('本程序未启用该市场，已跳过；券商权限未核实' if item.get('status')=='SKIPPED_SCOPE' else '')
 
 
 def describe_run(record):
@@ -26,11 +25,13 @@ def describe_run(record):
     if action=='monitor':
         issues=result.get('issues',[])
         if issues:return '监控提示：'+'、'.join(ISSUES.get(i,i) for i in issues)
-        return {'not_activated':'未启用，监控待命','outside_window':'监控时段外','market_closed':'非交易日'}.get(result.get('status'),'监控正常')
+        return {'not_activated':'未启用，监控待命','outside_window':'监控时段外','market_closed':'非交易日，已跳过','calendar_unknown':'日历未知，禁止提交'}.get(result.get('status'),'监控正常')
     if action=='backup':return '备份完成' if result.get('status')=='backup_complete' else '备份结果见详情'
     outcome=activity.get('outcome')
     if outcome=='already_complete':return '本日已处理，本轮跳过'
     if outcome=='queried_lunch':return '已查询，午间不提交'
+    if outcome=='connection_error':return 'QMT连接失败，待恢复'
+    if outcome=='query_error':return '查询未完成，待重试'
     if phase=='waiting_afternoon':return '等待13:00（本轮未查询）' if result.get('attempts')==0 else '等待下午申报时段'
     if phase=='waiting_open':return '等待09:35触发'
     if phase=='no_eligible':return '已查询，范围内无申购项目'
@@ -39,7 +40,8 @@ def describe_run(record):
     if phase=='retryable_error':return '连接或查询失败，待重试'
     if phase=='final_attention':return '收盘仍有未完成项目'
     if phase=='pending':return '部分项目待处理或核对'
-    if phase=='market_closed':return '非交易日，未申购'
+    if phase=='market_closed':return '非交易日，已跳过'
+    if phase=='calendar_unknown':return '日历未知，禁止提交'
     if phase=='complete':
         return f"本轮提交 {activity['submitted']} 笔，已核对" if activity.get('submitted') else '处理完成，详见项目结果'
     return '已结束，详见回执'
@@ -64,6 +66,9 @@ def make_row(path,record):
     lines=[f"任务：{ACTION_NAMES.get(record.get('action'),record.get('action','未知'))}",
            f"开始：{started}",f"结束：{record.get('finished_at') or '尚未结束'}",f"结果：{description}",
            f"本轮统计：{count_text}"]
+    if result.get('calendar_error'):lines.append(result['calendar_error'])
+    if result.get('calendar'):
+        cal=result['calendar'];lines.append(f"日历：{cal.get('status')} / {cal.get('source')} / {cal.get('covered_from')} 至 {cal.get('covered_through')}")
     if result.get('next_due'):lines.append('下一步时间：'+result['next_due'])
     for step in activity.get('steps',[]):lines.append(step.get('at','')+'  '+step.get('step',''))
     for code,item in sorted(result.get('items',{}).items()):
@@ -76,7 +81,6 @@ def make_row(path,record):
 
 def load_runs(control,day,limit=500):
     folder=Path(control)/'runs'/day
-    if not folder.is_dir():return []
     rows=[]
     for path in folder.glob('*.json'):
         try:
@@ -86,4 +90,15 @@ def load_runs(control,day,limit=500):
         except (OSError,ValueError,TypeError,KeyError):
             rows.append({'id':path.name,'started_at':'','time':'—','action':'回执读取','result':'记录不可读，未隐瞒为成功',
                          'counts':'—','duration':'—','detail':path.name,'is_cycle':False})
+    seen={row['id'] for row in rows}
+    for archive in (Path(control)/'archive'/'runs'/day).glob('*.zip'):
+        try:
+            with zipfile.ZipFile(archive) as z:
+                for name in z.namelist():
+                    if name in seen:continue
+                    record=json.loads(z.read(name).decode('utf-8-sig'))
+                    rows.append(make_row(Path(name),record));seen.add(name)
+        except (OSError,ValueError,KeyError,TypeError,zipfile.BadZipFile):
+            rows.append({'id':archive.name,'started_at':'','time':'—','action':'归档读取',
+                         'result':'归档不可读，需检查备份','counts':'—','duration':'—','detail':archive.name,'is_cycle':False})
     return sorted(rows,key=lambda r:(r['started_at'],r['id']),reverse=True)[:limit]

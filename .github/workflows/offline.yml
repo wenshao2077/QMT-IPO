@@ -1,0 +1,48 @@
+name: Offline verification
+on:
+  push:
+    branches: ['improve/calendar-gate-portable-delivery-20260912']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify delivery manifest (no SDK installation)
+        run: python -B -c "from installer import payload; payload('.')"
+      - name: Linux offline business and GUI tests
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery
+      - name: Windows offline business and GUI tests
+        if: runner.os == 'Windows'
+        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery
+      - name: Windows PowerShell definitions and parser checks (no registration)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: '& .\test_tasks.ps1'
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Export tracked source only
+        run: git archive --format=zip --output=source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reviewed-source
+          path: source.zip
+          retention-days: 7

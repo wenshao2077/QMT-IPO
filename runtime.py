@@ -66,7 +66,10 @@ def validate_config(config):
             raise ValueError('Absolute path required: '+key)
     if type(config.get('enable_execution')) is not bool:
         raise ValueError('Execution setting must be explicit boolean')
-    if not config.get('allowed_markets') or set(config['allowed_markets'])-{'SH','SZ','KCB'}:
+    if (not isinstance(config.get('allowed_markets'),list) or not config['allowed_markets']
+            or any(not isinstance(m,str) for m in config['allowed_markets'])
+            or len(set(config['allowed_markets']))!=len(config['allowed_markets'])
+            or set(config['allowed_markets'])-{'SH','SZ','KCB'}):
         raise ValueError('Invalid market settings')
     for key in ('state_dir','control_dir'):
         path=Path(config[key]).resolve(); qmt=Path(config['qmt_userdata']).resolve()
@@ -74,4 +77,9 @@ def validate_config(config):
             raise ValueError('Runtime must be separate from QMT userdata')
     if Path(config['state_dir']).resolve() == Path(config['control_dir']).resolve():
         raise ValueError('Control receipts must be separate from shared order ledger')
+    for key,low,high in (('receipt_hot_days',7,366),('backup_keep',2,365),('archive_warn_mb',1,1048576)):
+        if key in config and (type(config[key]) is not int or not low <= config[key] <= high):
+            raise ValueError('Invalid retention setting: '+key)
+    if config.get('calendar_dir') and not Path(config['calendar_dir']).is_absolute():
+        raise ValueError('Absolute path required: calendar_dir')
     return config

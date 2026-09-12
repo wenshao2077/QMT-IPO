@@ -9,7 +9,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from panel_backend import Backend, ITEM_STATES, PHASES, TASK_NAMES, plan_state
-from run_history import item_reason
+from run_history import item_reason, make_row
+from support import china_now
 
 BG='#eef2f7'; WHITE='#ffffff'; INK='#17243b'; MUTED='#69788e'; BLUE='#2859d8'
 SIDEBAR='#14213a'; GREEN='#087e67'; AMBER='#9a6700'; RED='#bb3545'; LINE='#dce3ed'
@@ -74,7 +75,7 @@ class Panel:
         tk.Frame(sidebar,bg='#334460',height=1).pack(fill='x',padx=24,pady=8)
         for text in ('每天自动运行','新股 + 新债','回执与通知','任务异常监控'):
             label(sidebar,'  •  '+text,10,fg='#cad6e8',bg=SIDEBAR).pack(fill='x',padx=18,pady=10)
-        label(sidebar,'桌面版 3.2\n不开放网络端口',9,fg='#94a7c5',bg=SIDEBAR,justify='left').pack(side='bottom',anchor='w',padx=26,pady=26)
+        label(sidebar,'桌面版 3.3 RC1\n不开放网络端口',9,fg='#94a7c5',bg=SIDEBAR,justify='left').pack(side='bottom',anchor='w',padx=26,pady=26)
         content=tk.Frame(root,bg=BG,padx=26,pady=22);content.pack(side='left',fill='both',expand=True)
         head=tk.Frame(content,bg=BG);head.pack(fill='x',pady=(0,16))
         label(head,'每日自动打新',23,True,bg=BG).pack(side='left')
@@ -117,6 +118,11 @@ class Panel:
             self.table.heading(col,text=title);self.table.column(col,width=width,minwidth=55,stretch=col in ('name','status'))
         scroll=ttk.Scrollbar(tablebox,orient='vertical',command=self.table.yview);self.table.configure(yscrollcommand=scroll.set)
         self.table.pack(side='left',fill='both',expand=True);scroll.pack(side='right',fill='y')
+        validation=tk.Frame(settings,bg=WHITE);validation.pack(side='bottom',fill='x')
+        self.buttons['validate']=button(validation,'校验配置（不发送）',self.validate_configuration)
+        self.buttons['validate'].pack(side='left')
+        self.buttons['test_notify']=button(validation,'测试通知（需确认发送）',self.test_notification)
+        self.buttons['test_notify'].pack(side='right')
         settings_scroll=ttk.Scrollbar(settings,orient='vertical');settings_scroll.pack(side='right',fill='y')
         self.environment=tk.Text(settings,wrap='word',font=FONT,bg=WHITE,fg=INK,relief='flat',height=8,state='disabled',yscrollcommand=settings_scroll.set)
         self.environment.pack(side='left',fill='both',expand=True);settings_scroll.configure(command=self.environment.yview)
@@ -180,6 +186,10 @@ class Panel:
                     self.feedback_latched=True
                     if error:
                         self.feedback.configure(text='操作未完成：'+type(error).__name__+'。未确认的状态请以刷新结果为准。',fg=RED)
+                    elif kind in ('validate','test_notify'):
+                        ok=data.get('ok') is True
+                        text=('配置校验通过；未连接账户、未发送消息。' if kind=='validate' else '测试通知已确认送达；未提交申购。') if ok else '检查未通过：'+'、'.join(data.get('issues',[]) or [data.get('error_type','请查看配置与日志')])
+                        self.feedback.configure(text=text,fg=GREEN if ok else RED)
                     elif kind=='check':
                         ok=data.get('account_ready') is True
                         self.feedback.configure(text=('QMT连接与账户登录正常；本次只读检查，未提交申购。' if ok else 'QMT只读检查未通过，请核对客户端登录。'),fg=GREEN if ok else RED)
@@ -190,7 +200,7 @@ class Panel:
                         if ok and data.get('snapshot'):self.render(data['snapshot'],preserve_feedback=True)
                     self.update_buttons();self.refresh()
         except queue.Empty:pass
-        self.clock.configure(text=datetime.now().strftime('%Y-%m-%d  %H:%M:%S'))
+        self.clock.configure(text=china_now().strftime('%Y-%m-%d  %H:%M:%S')+' 北京时间')
         self.later(100,self.poll)
 
     def update_buttons(self):
@@ -198,6 +208,8 @@ class Panel:
         self.buttons['enable'].configure(state='normal' if not self.busy and state in ('disabled','inconsistent') else 'disabled')
         self.buttons['pause'].configure(state='normal' if not self.busy and state in ('enabled','inconsistent') else 'disabled')
         self.buttons['check'].configure(state='normal' if not self.busy and self.snapshot else 'disabled')
+        for name in ('validate','test_notify'):
+            self.buttons[name].configure(state='normal' if not self.busy and self.snapshot else 'disabled')
         self.buttons['enable'].configure(text='每日计划已启用' if state=='enabled' else '授权并启用每日打新')
 
     def render(self,data,preserve_feedback=False):
@@ -212,7 +224,7 @@ class Panel:
         if not preserve_feedback and not self.busy and not self.feedback_latched:
             self.feedback.configure(text=('首次控制需要Windows系统授权，程序会自动提示，不用手动以管理员运行。' if data.get('needs_admin') else '任务管理权限已就绪。所有控制操作都有结果回读和记录。'),fg=MUTED)
         doc=data.get('daily')
-        self.cards['today'].configure(text=PHASES.get(doc.get('phase'),doc.get('phase')) if doc else '尚未开始')
+        self.cards['today'].configure(text=PHASES.get(doc.get('phase'),doc.get('phase')) if doc else ('非交易日，已跳过' if data.get('calendar',{}).get('status')=='market_closed' else '日历未知，禁止提交' if data.get('calendar',{}).get('status')=='unknown' else '尚未开始'))
         cycle=next((t for t in data.get('tasks',[]) if t['name']=='QmtIPO3-Cycle'),{})
         upcoming='待启用'
         if cycle.get('enabled') and cycle.get('next_run'):
@@ -222,12 +234,19 @@ class Panel:
             except ValueError:upcoming='待刷新'
         self.cards['next'].configure(text=upcoming)
         pending=data.get('pending_notifications')
-        self.cards['notify'].configure(text='待读取' if pending is None else '全部已送达' if pending==0 else f'{pending} 条待发送')
+        self.cards['notify'].configure(text='待读取' if pending is None else '无待发消息' if pending==0 else f'{pending} 条待发送')
+        if pending==0 and data.get('suppressed_notifications'):
+            self.cards['notify'].configure(text=f"无待发；{data['suppressed_notifications']} 条已抑制")
+        if data.get('failed_notifications'):
+            self.cards['notify'].configure(text=f"{data['failed_notifications']} 条发送失败 / {pending} 条待发")
         self.run_rows={row['id']:row for row in data.get('runs',[])}
         self.run_table.delete(*self.run_table.get_children())
         for row in data.get('runs',[]):
             self.run_table.insert('','end',iid=row['id'],values=tuple(row[k] for k in ('time','action','result','counts','duration')))
         latest=next((row for row in data.get('runs',[]) if row.get('is_cycle')),None)
+        if latest is None and data.get('latest_cycle'):
+            latest=make_row(Path('latest-cycle-live.json'),data['latest_cycle'])
+            latest['time']=str(data['latest_cycle'].get('day',''))+' '+latest['time']
         self.last_run.configure(text=('最近自动触发：'+latest['time']+'  '+latest['result']+'  |  '+latest['counts'] if latest else '最近自动触发：今天尚无运行回执'))
         checked=data.get('checked_at','')
         try:checked=datetime.fromisoformat(checked).strftime('%H:%M:%S')
@@ -241,6 +260,8 @@ class Panel:
         if 'daily_unavailable' in data.get('data_errors',[]):self.daily_note.configure(text='今日记录暂时无法读取，不能据此判断没有申购。请查看日志。')
         qmt='进程可见（不等于账户已登录）' if data.get('qmt_process_present') and data.get('quote_process_present') else '未检测到完整客户端进程'
         environment=f"账户尾号：{data.get('account_tail','—')}\n启用市场：{' / '.join(data.get('markets',[]))}\nQMT：{qmt}\n客户端目录：{data.get('qmt_path','—')}\n企业微信：{'已配置' if data.get('webhook_configured') else '未配置'}\n\n每日流程\n09:35 自动开始；未完成项目每5分钟继续处理\n15:05 最终核对券商回报\n16:20 一致性备份；通知失败留队补发\n\n只做申购，不自动卖出或缴款。运行中不重启QMT。"
+        cal=data.get('calendar',{})
+        environment+=f"\n\n交易日历：{cal.get('status','待读取')}\n来源：{cal.get('source','—')}\n覆盖：{cal.get('covered_from','—')} 至 {cal.get('covered_through','—')}\n说明：{cal.get('reason','—')}\n已抑制休市误报：{data.get('suppressed_notifications',0)} 条（原消息保留，不算送达）\n券商交易接口权限：需只读联调及用户核实，不由市场配置推断。"
         self.environment.configure(state='normal');self.environment.delete('1.0','end');self.environment.insert('1.0',environment);self.environment.configure(state='disabled')
         rows=[]
         operation_names={'Enable':'授权并启用','Pause':'暂停每日计划','Prepare':'准备任务管理权限'}
@@ -285,6 +306,17 @@ class Panel:
         if self.busy:return
         self.busy=True;self.update_buttons();self.feedback.configure(text='正在只读检查QMT连接，不会提交申购…',fg=BLUE)
         self.async_job('check',self.backend.check_connection)
+
+    def validate_configuration(self):
+        if self.busy or not self.snapshot:return
+        self.busy=True;self.update_buttons()
+        self.async_job('validate',self.backend.validate_configuration)
+
+    def test_notification(self):
+        if self.busy or not self.snapshot:return
+        if not self.confirm('发送测试通知','这会向已配置的企业微信群机器人发送一条测试消息；不会连接交易账户或提交申购。','确认发送测试'):return
+        self.busy=True;self.update_buttons()
+        self.async_job('test_notify',lambda:self.backend.test_notification(confirmed=True))
 
     def open_logs(self):
         try:self.backend.open_logs()

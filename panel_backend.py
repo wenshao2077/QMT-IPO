@@ -17,12 +17,15 @@ import uuid
 
 from runtime import read_json
 from run_history import load_runs
+from support import china_now
+from market_calendar import CalendarService
+from notification_policy import notification_stats
 
 TASK_NAMES=('QmtIPO3-Cycle','QmtIPO3-Notify','QmtIPO3-Monitor','QmtIPO3-Backup')
 PHASES={'complete':'今日处理完成','no_ipo':'今日无申购项目','no_eligible':'无范围内项目','pending':'部分项目待处理',
         'retryable_error':'等待连接或数据恢复','final_attention':'收盘仍需核对',
         'waiting_open':'等待开盘后触发','waiting_afternoon':'等待下午交易时段',
-        'market_closed':'非交易日','waiting_data':'等待数据复核','running':'正在处理'}
+        'market_closed':'非交易日，已跳过','calendar_unknown':'日历未知，禁止提交','waiting_data':'等待数据复核','running':'正在处理'}
 ITEM_STATES={'REPORTED':'券商已报','SUCCEEDED':'券商已成','EXTERNAL_ACCEPTED':'已有委托，已跳过',
              'REJECTED':'废单待核对','CANCELED':'已撤待核对','PENDING':'等待回报',
              'SUBMITTED':'已提交待确认','INTENT':'请求已登记','UNCERTAIN':'结果待核对',
@@ -108,7 +111,7 @@ class WindowsController:
             if kernel.WaitForSingleObject(info.hProcess,180000)==258:
                 return {'ok':False,'error':'系统授权仍未结束。请完成或关闭授权窗口，再刷新状态。'}
         finally:kernel.CloseHandle(info.hProcess)
-        receipt=self.root/'runtime'/'panel-actions'/(rid+'.json')
+        receipt=Path(read_json(self.root/'config.json')['control_dir'])/'panel-actions'/(rid+'.json')
         return read_json(receipt) if receipt.exists() else {'ok':False,'error':'系统权限准备未完成；没有启用每日申购。'}
 
 
@@ -120,21 +123,29 @@ class Backend:
     def snapshot(self):
         snap=self.controller.call('Snapshot')
         if not snap.get('ok'):return snap
-        now=datetime.now();day=now.strftime('%Y-%m-%d')
+        now=china_now();day=now.strftime('%Y-%m-%d')
         control=Path(snap['control_dir'])
         daily=control/'daily'/(day+'-live.json')
         snap['daily']=None;snap['data_errors']=[]
         try:
             if daily.is_file():snap['daily']=read_json(daily)
         except (OSError,ValueError):snap['data_errors'].append('daily_unavailable')
-        snap['pending_notifications']=None
-        ledger=Path(snap['state_dir'])/'state.sqlite3'
-        if ledger.is_file():
-            try:
-                conn=sqlite3.connect(ledger.as_uri()+'?mode=ro',uri=True,timeout=2)
-                try:snap['pending_notifications']=conn.execute('SELECT COUNT(*) FROM outbox WHERE delivered=0').fetchone()[0]
-                finally:conn.close()
-            except sqlite3.Error:snap['data_errors'].append('notification_status_unavailable')
+        try:
+            cfg=read_json(self.root/'config.json')
+        except (OSError,ValueError):
+            cfg={'state_dir':snap['state_dir'],'allowed_markets':snap.get('markets') or ['SH','SZ']}
+        snap['calendar']=CalendarService(cfg).decide(day).to_dict()
+        snap['notification_status']={}
+        for name,path in [('business',Path(snap['state_dir'])/'state.sqlite3'),('monitor',control/'monitor.sqlite3')]:
+            try:snap['notification_status'][name]=notification_stats(path)
+            except (sqlite3.Error,OSError):snap['data_errors'].append('notification_status_unavailable')
+        business=snap['notification_status'].get('business',{})
+        monitor=snap['notification_status'].get('monitor',{})
+        snap['pending_notifications']=(business.get('pending') or 0)+(monitor.get('pending') or 0) if business.get('pending') is not None else None
+        snap['failed_notifications']=(business.get('failed') or 0)+(monitor.get('failed') or 0)
+        snap['suppressed_notifications']=(business.get('suppressed') or 0)+(monitor.get('suppressed') or 0)
+        try:snap['latest_cycle']=read_json(control/'latest-cycle-live.json')
+        except (OSError,ValueError):snap['latest_cycle']=None
         history=[]
         events=control/'panel-actions'
         if events.is_dir():
@@ -175,5 +186,15 @@ class Backend:
             except ValueError:pass
         return {'status':'failed','error_type':'NoReadableResponse'}
 
+    def validate_configuration(self):
+        from diagnostics import configuration_report
+        return configuration_report(read_json(self.root/'config.json'))
+
+    def test_notification(self,confirmed=False):
+        if not confirmed:raise ValueError('发送测试消息必须明确确认')
+        from diagnostics import test_notification
+        return test_notification(read_json(self.root/'config.json'),confirmed=True)
+
     def open_logs(self):
-        os.startfile(str(self.root/'runtime'))
+        config=read_json(self.root/'config.json')
+        os.startfile(str(Path(config['control_dir'])))

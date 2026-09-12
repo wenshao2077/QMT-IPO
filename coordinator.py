@@ -12,6 +12,9 @@ import time
 
 from runtime import atomic_json, read_json
 from support import Store, build_plan, positive_int
+from market_calendar import CalendarService, CLOSED, UNKNOWN
+from notification_policy import enqueue_calendar_issue
+from privacy import redact
 
 ACCEPTED={'REPORTED','SUCCEEDED'}
 PENDING={'INTENT','UNCERTAIN','SUBMITTED','PENDING','PARTIAL'}
@@ -40,8 +43,9 @@ def submit_window(now):
 
 
 class Coordinator:
-    def __init__(self,config,broker,ledger,now,mode='preview'):
+    def __init__(self,config,broker,ledger,now,mode='preview',calendar_decision=None):
         self.config,self.broker,self.ledger,self.now=config,broker,ledger,now
+        self.calendar_decision=calendar_decision
         self.activity={'queried':False,'candidate_count':None,'submitted':0,'deferred':0,
                        'scope_skipped':0,'outcome':'starting','steps':[]}
         self.mode=mode
@@ -122,7 +126,8 @@ class Coordinator:
                 'WAITING_WINDOW':'已查询，等待申报时段'}
         phases={'complete':'本日处理完成','pending':'部分项目待核对或重试','no_ipo':'今日无申购项目',
                 'final_attention':'收盘仍有项目需处理','retryable_error':'连接或查询待恢复',
-                'waiting_afternoon':'午间已查询，等待13:00','no_eligible':'已查询，无范围内申购项目'}
+                'waiting_afternoon':'午间已查询，等待13:00','no_eligible':'已查询，无范围内申购项目',
+                'market_closed':'非交易日，已跳过','calendar_unknown':'日历未知，禁止提交'}
         lines=[f"状态：{phases.get(self.doc['phase'],self.doc['phase'])}；项目：{len(self.doc['items'])}只"]
         if not self.doc['items'] and self.doc['phase']=='no_ipo':
             lines.append('已分两轮查询确认，今日无新股、新债。')
@@ -134,13 +139,27 @@ class Coordinator:
                 lines.append(item['reason'])
         lines.extend(self.doc.get('errors',[]))
         lines.append('委托已报/已成不代表中签；本程序不卖出、不缴款。')
-        text='\n'.join(lines)
+        text=redact('\n'.join(lines),self.config)
         fingerprint=hashlib.sha256(text.encode()).hexdigest()[:16]
         self.message('summary:'+fingerprint,text)
 
     def run(self):
         stamp=self.now(); t=stamp.time().replace(tzinfo=None)
         self.doc['next_due']=None
+        decision=self.calendar_decision or CalendarService(self.config).decide(self.day)
+        if decision.day != self.day:
+            raise ValueError('Calendar decision date mismatch')
+        self.doc['calendar']=decision.to_dict()
+        if decision.status in (CLOSED, UNKNOWN):
+            self.activity['outcome']='market_closed' if decision.status==CLOSED else 'calendar_unknown'
+            # Historical run receipts remain untouched. Do not clear previous
+            # errors/items or pretend that old connection attempts succeeded.
+            self.doc.update(phase=self.activity['outcome'], completed=False)
+            self.doc['calendar_error']=decision.reason if decision.status==UNKNOWN else None
+            self.note('非交易日，已跳过' if decision.status==CLOSED else '日历未知，禁止提交')
+            if decision.status==UNKNOWN:
+                enqueue_calendar_issue(self.config,decision)
+            return self.save()
         if t<T(9,35):
             self.activity['outcome']='waiting_open'
             self.doc.update(phase='waiting_open',next_due=self.day+'T09:35:00+08:00')
@@ -154,13 +173,11 @@ class Coordinator:
         self.doc['errors']=[]
         self.doc['phase']='running'
         self.save()
+        connected=False
         try:
             self.note('开始连接QMT')
             self.broker.connect()
-            if not self.broker.is_trading_day(self.day):
-                self.activity['outcome']='market_closed'
-                self.doc.update(phase='market_closed',completed=True)
-                return self.save()
+            connected=True
             self.broker.ready()
             self.note('连接与账户状态正常')
             self.synchronize(self.orders())
@@ -199,7 +216,7 @@ class Coordinator:
                     continue
                 market='KCB' if info['type']=='STOCK' and code.endswith('.SH') and code.startswith(('688','689','787','789')) else code[-2:]
                 if market not in self.config['allowed_markets']:
-                    reason='北交所无权限，已跳过' if market=='BJ' else '该市场未启用，已跳过'
+                    reason='本程序未启用北交所市场，已跳过；未据此判断券商权限' if market=='BJ' else '本程序未启用该市场，已跳过；未据此判断券商权限'
                     item.update(status='SKIPPED_SCOPE',quantity=0,reason=reason)
                     self.activity['scope_skipped']+=1
                     continue
@@ -260,7 +277,8 @@ class Coordinator:
             self.note('本轮完成：提交'+str(self.activity['submitted'])+'笔')
             self.summary()
         except Exception as exc:
-            self.activity['outcome']='query_error'
+            self.activity['outcome']='query_error' if connected else 'connection_error'
+            self.activity['error_code']='qmt_query_failed' if connected else 'qmt_connection_failed'
             self.doc.update(completed=False,phase='final_attention' if t>T(14,50) else 'retryable_error')
             self.doc['errors']=[f'连接/查询未完成（{type(exc).__name__}）；仅未发起过的项目允许后续尝试。']
             # One notification per error type / 30-minute bucket, not every poll.

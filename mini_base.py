@@ -3,7 +3,7 @@
 No QMT/QuantClass process start, stop, restart or ledger modification.
 close() stops only this process's XtQuantTrader connection.
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 from pathlib import Path
 import time
@@ -41,53 +41,13 @@ class MiniBroker:
             self.trader.stop()
 
     def is_trading_day(self, day):
-        # Use QMT calendar, not the upstream fixed D:\data\period_offset.csv.
-        year = day[:4]
-        dates = self.data.get_trading_dates('SH', year+'0101', year+'1231', -1)
-        if dates is None or len(dates) == 0:
-            raise RuntimeError('交易日历不可用，禁止将空数据当作休市')
-        parsed = set()
-        for value in dates:
-            # xtdata trading dates are Unix milliseconds.
-            stamp = float(value)
-            if stamp < 1_000_000_000_000:
-                raise RuntimeError('交易日历时间单位不符合毫秒接口合同')
-            parsed.add(datetime.fromtimestamp(stamp/1000, CHINA).date().isoformat())
-        covered_through = max(parsed)
-        # get_trading_dates is historical. Extend ONLY using existing, year-covered
-        # QMT holiday data. Do not invoke SDK get_trading_calendar (it downloads).
-        try:
-            holidays = self.data.get_holidays()
-            if (not isinstance(holidays, (list, tuple)) or not holidays) and self.config.get('holiday_file'):
-                holidays = [line.strip().replace('-', '') for line in
-                            Path(self.config['holiday_file']).read_text(encoding='utf-8-sig').splitlines()
-                            if line.strip() and not line.lstrip().startswith('#')]
-            if not isinstance(holidays, (list, tuple)) or not holidays:
-                raise ValueError('holidays unavailable')
-            holidays = {datetime.strptime(str(value), '%Y%m%d').date() for value in holidays}
-            if max(holidays).year < int(year):
-                raise ValueError('holidays stale')
-            stamp = datetime.fromisoformat(covered_through).date() + timedelta(days=1)
-            end = datetime(int(year), 12, 31).date()
-            while stamp <= end:
-                if stamp.weekday() < 5 and stamp not in holidays:
-                    parsed.add(stamp.isoformat())
-                stamp += timedelta(days=1)
-            covered_through = end.isoformat()
-        except (ValueError, TypeError, AttributeError):
-            pass
-        if self.config.get('state_dir'):
-            import json
-            import uuid
-            root = Path(self.config['state_dir'])
-            root.mkdir(parents=True, exist_ok=True)
-            temp = root/('calendar.'+uuid.uuid4().hex+'.tmp')
-            temp.write_text(json.dumps({'year': int(year), 'days': sorted(parsed), 'covered_through': covered_through,
-                                        'refreshed_at': datetime.now(CHINA).isoformat()}), encoding='utf-8')
-            os.replace(temp, root/'calendar.json')
-        if day > covered_through:
-            raise RuntimeError('日历未覆盖请求日期，不能当作休市')
-        return day in parsed
+        # Compatibility entry point. Calendar decision no longer needs self.data
+        # or a successful account connection and never extrapolates holidays.
+        from market_calendar import CalendarService, OPEN, UNKNOWN
+        decision = CalendarService(self.config).decide(day)
+        if decision.status == UNKNOWN:
+            raise RuntimeError('交易日历未知；请独立更新日历，不允许提交')
+        return decision.status == OPEN
 
     def ipos(self):
         return self.trader.query_ipo_data()

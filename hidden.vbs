@@ -1,15 +1,12 @@
 Option Explicit
-Dim shell, arguments, script, action, command
-Set shell=CreateObject("WScript.Shell")
-Set arguments=WScript.Arguments
-If arguments.Count <> 2 Then WScript.Quit 64
-script=arguments(0)
-action=arguments(1)
-If InStr(script,Chr(34))>0 Then WScript.Quit 64
-Select Case action
-Case "cycle", "notify", "monitor", "backup"
-Case Else
-    WScript.Quit 64
-End Select
-command=Chr(34) & shell.ExpandEnvironmentStrings("%LOCALAPPDATA%") & "\Microsoft\WindowsApps\pwsh.exe" & Chr(34) & " -NoProfile -ExecutionPolicy Bypass -File " & Chr(34) & script & Chr(34) & " -Action " & action
-WScript.Quit shell.Run(command,0,True)
+Dim shell, fso, scriptPath, action, powershell, command
+If WScript.Arguments.Count <> 2 Then WScript.Quit 2
+Set shell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+scriptPath = fso.BuildPath(fso.GetParentFolderName(WScript.ScriptFullName), "run_scheduled.ps1")
+If LCase(fso.GetAbsolutePathName(WScript.Arguments(0))) <> LCase(scriptPath) Then WScript.Quit 2
+action = WScript.Arguments(1)
+If action <> "cycle" And action <> "notify" And action <> "monitor" And action <> "backup" Then WScript.Quit 2
+powershell = shell.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"
+command = """" & powershell & """ -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & scriptPath & """ -Action " & action
+WScript.Quit shell.Run(command, 0, True)

@@ -17,26 +17,42 @@ from broker import Broker, ReadOnlyBroker
 from coordinator import Coordinator, Ledger
 from runtime import atomic_json, backup, read_json, single_instance, validate_config
 from support import Store, china_now, wecom_sender
+from market_calendar import CalendarService, CLOSED, UNKNOWN, ensure_calendar
+from notification_policy import enqueue_calendar_issue, notification_stats, suppress_closed_alerts
+from retention import maintain, archive_size_warning
 
-VERSION='3.2.0'
+VERSION='3.3.0-rc1'
 
 
 def inspect_health(config,now=None):
     now=now or china_now(); root=Path(config['control_dir'])
     active=config.get('enable_execution') is True
-    info={'day':now.date().isoformat(),'checked_at':now.isoformat(),'active':active,'issues':[]}
+    decision=CalendarService(config).decide(now.date().isoformat())
+    info={'day':now.date().isoformat(),'checked_at':now.isoformat(),'active':active,
+          'calendar':decision.to_dict(),'issues':[]}
     if not active:
         return info|{'status':'not_activated'}
-    if now.weekday()>=5 or not '09:25'<=now.strftime('%H:%M')<='16:20':
-        return info|{'status':'outside_window'}
+    # Delivery of real order results and storage supervision remain relevant on
+    # holidays. Availability alerts are gated by the same calendar as submission.
     try:
-        calendar=read_json(Path(config['state_dir'])/'calendar.json')
-        if info['day']>calendar['covered_through']:
-            raise ValueError('stale calendar')
-        if info['day'] not in calendar['days']:
-            return info|{'status':'market_closed'}
-    except Exception:
+        stats=notification_stats(Path(config['state_dir'])/'state.sqlite3')
+        info.update(pending_notifications=stats['pending'],failed_notifications=stats['failed'],
+                    suppressed_notifications=stats['suppressed'])
+        if stats['pending'] is None:
+            info['issues'].append('ledger_unavailable')
+        elif stats['failed']:
+            info['issues'].append('notification_backlog')
+    except (sqlite3.Error,OSError):
+        info['issues'].append('ledger_unavailable')
+    if archive_size_warning(config):
+        info['issues'].append('audit_archive_capacity')
+    if decision.status==CLOSED:
+        return info|{'status':'attention' if info['issues'] else 'market_closed'}
+    if decision.status==UNKNOWN:
         info['issues'].append('calendar_unavailable')
+        return info|{'status':'calendar_unknown'}
+    if not '09:25'<=now.strftime('%H:%M')<='16:20':
+        return info|{'status':'attention' if info['issues'] else 'outside_window'}
     try:
         receipt=read_json(root/'latest-cycle-live.json')
         age=(now-datetime.fromisoformat(receipt['started_at'])).total_seconds()
@@ -44,7 +60,7 @@ def inspect_health(config,now=None):
             info['issues'].append('cycle_stuck')
         if receipt['day']!=info['day']:
             raise ValueError('prior day')
-    except Exception:
+    except (OSError,ValueError,KeyError,TypeError):
         if now.strftime('%H:%M')>='09:45':
             info['issues'].append('daily_run_missing')
     try:
@@ -59,52 +75,47 @@ def inspect_health(config,now=None):
             info['issues'].append('daily_work_incomplete')
         if not doc.get('completed') and now.strftime('%H:%M')>='15:10':
             info['issues'].append('closeout_failed')
-    except Exception:
+    except (OSError,ValueError,KeyError,TypeError):
         if now.strftime('%H:%M')>='09:45':
             info['issues'].append('daily_record_missing')
-    try:
-        conn=sqlite3.connect((Path(config['state_dir'])/'state.sqlite3').resolve().as_uri()+'?mode=ro',uri=True,timeout=2)
-        try:
-            count,attempts=conn.execute('SELECT COUNT(*),COALESCE(MAX(attempts),0) FROM outbox WHERE delivered=0').fetchone()
-            if count and attempts>=2:
-                info['issues'].append('notification_backlog')
-            info['pending_notifications']=count
-        finally: conn.close()
-    except Exception:
-        info['issues'].append('ledger_unavailable')
     return info|{'status':'attention' if info['issues'] else 'healthy'}
 
 
 def watch(config,send=False,now=None):
     now=now or china_now(); root=Path(config['control_dir'])
     snapshot=inspect_health(config,now)
+    if snapshot['status']=='calendar_unknown':
+        enqueue_calendar_issue(config,CalendarService(config).decide(snapshot['day']))
     statepath=root/'monitor-state.json'
-    before=read_json(statepath) if statepath.exists() else {'issues':[],'count':0,'alerted':False,'last_alert':0}
-    if snapshot['status'] not in ('healthy','attention'):
-        atomic_json(root/'health.json',snapshot)
-        return snapshot
+    try:
+        before=read_json(statepath)
+        if not isinstance(before,dict):raise ValueError('Invalid monitor state')
+    except (OSError,ValueError):
+        before={'issues':[],'count':0,'alerted':False,'last_alert':0}
     issues=sorted(snapshot['issues'])
     count=before.get('count',0)+1 if issues==before.get('issues') else 1
     alerted=before.get('alerted',False); last=before.get('last_alert',0)
     text=None
-    if issues and count>=2 and (issues!=before.get('last_alert_issues') or now.timestamp()-last>=1800):
-        labels={'calendar_unavailable':'日历不可用','cycle_stuck':'任务长时间未结束',
-                'daily_run_missing':'今日定时任务漏跑','daily_work_incomplete':'今日仍有未完成项目',
-                'closeout_failed':'收盘核对未完成','daily_record_missing':'今日运行记录缺失',
-                'notification_backlog':'通知连续失败并积压','ledger_unavailable':'去重账本不可读'}
-        text='自动打新异常：'+'；'.join(labels.get(i,i) for i in issues)+'。请查看每日状态；监控未重启、未补单。'
-        last=now.timestamp(); alerted=True
-    elif not issues and alerted:
-        text='自动打新链路恢复；以每日明细与券商委托状态为准。'
-        alerted=False
-    # A separate DB means the monitor can alert even if the main ledger is unavailable.
+    if snapshot['status'] in ('healthy','attention'):
+        if issues and count>=2 and (issues!=before.get('last_alert_issues') or now.timestamp()-last>=1800):
+            labels={'cycle_stuck':'任务长时间未结束','daily_run_missing':'今日定时任务漏跑',
+                    'daily_work_incomplete':'今日仍有未完成项目','closeout_failed':'收盘核对未完成',
+                    'daily_record_missing':'今日运行记录缺失','notification_backlog':'通知连续失败并积压',
+                    'ledger_unavailable':'去重账本不可读','audit_archive_capacity':'审计归档接近容量阈值，请离线备份并核验'}
+            text='自动打新异常：'+'；'.join(labels.get(i,i) for i in issues)+'。请查看每日状态；监控未重启、未补单。'
+            last=now.timestamp(); alerted=True
+        elif not issues and alerted:
+            text='自动打新链路恢复；以每日明细与券商委托状态为准。'
+            alerted=False
+        atomic_json(statepath,{'issues':issues,'count':count,'alerted':alerted,'last_alert':last,
+                               'last_alert_issues':issues if text and issues else before.get('last_alert_issues')})
     store=Store(root/'monitor.sqlite3')
     try:
         if text:
             store.event(f'monitor:{now.date()}:{last}:{bool(issues)}',f'{now:%Y-%m-%d %H:%M}\n{text}')
-        atomic_json(statepath,{'issues':issues,'count':count,'alerted':alerted,'last_alert':last,
-                               'last_alert_issues':issues if text and issues else before.get('last_alert_issues')})
-        if send:
+        suppress_closed_alerts(store,config)
+        # Closed/unknown days do not discard real result notifications.
+        if send and store.pending_notifications():
             store.drain(wecom_sender(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip()))
         snapshot['pending_monitor_notifications']=store.pending_notifications()
     finally: store.close()
@@ -121,7 +132,8 @@ def dispatch(action,config,live=False,send=False,broker_factory=None,now=china_n
     if live and action!='cycle':
         raise ValueError('Only cycle supports live mode')
     root=Path(config['control_dir']); shared=Path(config['state_dir'])
-    if live:
+    if action in ('cycle','notify','backup'):
+        # No scheduled or preview path may recreate a lost audit ledger.
         # An upgraded live worker must never silently reinitialize a lost ledger.
         path=shared/'state.sqlite3'
         if not path.is_file():
@@ -135,7 +147,7 @@ def dispatch(action,config,live=False,send=False,broker_factory=None,now=china_n
     mode='live' if live or (action=='status' and config['enable_execution']) else 'preview'
     if action=='status':
         path=root/'daily'/f'{now().date().isoformat()}-{mode}.json'
-        return read_json(path) if path.exists() else {'status':'not_run','mode':mode}
+        return (read_json(path) if path.exists() else {'status':'not_run','mode':mode}) | {'calendar':CalendarService(config).decide(now().date().isoformat()).to_dict()}
     # Reuse V2's single-instance lock for all order/notification operations.
     lock=root/'monitor.lock' if action=='monitor' else shared/'instance.lock'
     with single_instance(lock):
@@ -152,21 +164,23 @@ def dispatch(action,config,live=False,send=False,broker_factory=None,now=china_n
             elif action=='backup':
                 target=root/'backups'/(str(started.date())+'-'+rid[:8]+'.sqlite3')
                 backup(shared/'state.sqlite3',target)
-                result={'status':'backup_complete','file':target.name}
+                result={'status':'backup_complete','file':target.name,'retention':maintain(config,started.date())}
             else:
                 store=Ledger(shared/'state.sqlite3')
                 try:
+                    suppressed=suppress_closed_alerts(store,config)
                     if action=='cycle':
+                        decision=ensure_calendar(config,started.date().isoformat(),started)
                         factory=broker_factory or (Broker if live else ReadOnlyBroker)
-                        coordinator=Coordinator(config,factory(config),store,now,mode)
+                        coordinator=Coordinator(config,factory(config),store,now,mode,calendar_decision=decision)
                         result=coordinator.run()
                         receipt['activity']=getattr(coordinator,'activity',{})
                     elif action!='notify':
                         raise ValueError('Unknown action')
-                    if send:
+                    if send and store.pending_notifications():
                         pending=store.drain(wecom_sender(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip()))
                     else: pending=store.pending_notifications()
-                    result=dict(result,pending_notifications=pending)
+                    result=dict(result,pending_notifications=pending,suppressed_this_run=suppressed)
                 finally: store.close()
             receipt.update(status='finished',finished_at=now().isoformat(),result=result)
         except Exception as exc:
@@ -189,7 +203,7 @@ def main(argv=None):
         print(json.dumps(result,ensure_ascii=False))
         if result.get('status')=='failed': return 1
         detail=result.get('result',result)
-        if detail.get('phase') in ('pending','retryable_error','final_attention'): return 2
+        if detail.get('phase') in ('pending','retryable_error','final_attention','calendar_unknown'): return 2
         if detail.get('pending_notifications',0): return 3
         return 0
     except Exception as exc:

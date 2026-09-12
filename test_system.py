@@ -242,10 +242,10 @@ class DailySystemTests(unittest.TestCase):
         self.assertTrue(self.run_cycle()['completed'])
 
     def test_nontrading_day_and_lunch(self):
-        self.broker.is_trade=False
+        self.clock=OPEN.replace(day=12)  # Saturday: must decide before broker connection.
         self.assertEqual(self.run_cycle()['phase'],'market_closed')
         self.assertEqual(self.broker.calls,[])
-        self.clock=OPEN.replace(hour=12,minute=0)
+        self.clock=self.clock.replace(hour=12,minute=0)
         self.assertEqual(self.run_cycle()['phase'],'market_closed')
 
     def test_lunch_queries_without_intent_then_afternoon_can_submit(self):
@@ -261,11 +261,11 @@ class DailySystemTests(unittest.TestCase):
         self.assertTrue(self.run_cycle()['completed'])
         self.assertEqual(len(self.broker.calls),1)
 
-    def test_lunch_bj_has_explicit_permission_reason(self):
+    def test_lunch_bj_has_explicit_scope_not_permission_reason(self):
         self.clock=OPEN.replace(hour=12,minute=0)
         self.broker.items={'920229.BJ':info(purchaseDate='0')}
         result=self.run_cycle()
-        self.assertEqual(result['items']['920229.BJ']['reason'],'北交所无权限，已跳过')
+        self.assertEqual(result['items']['920229.BJ']['reason'],'本程序未启用北交所市场，已跳过；未据此判断券商权限')
         self.assertEqual(result['last_activity']['scope_skipped'],1)
         self.assertFalse(result['completed'])
         self.assertEqual(self.broker.calls,[])

@@ -22,7 +22,7 @@ class HistoryTests(unittest.TestCase):
         row=make_row(Path('new.json'),record)
         self.assertEqual(row['result'],'已查询，午间不提交')
         self.assertEqual(row['counts'],'返回 1 条 / 0笔提交')
-        self.assertIn('北交所无权限，已跳过',row['detail'])
+        self.assertIn('本程序未启用该市场，已跳过；券商权限未核实',row['detail'])
 
     def test_cached_completion_does_not_claim_new_query(self):
         record={'action':'cycle','status':'finished','activity':{'outcome':'already_complete','queried':False,'submitted':0},
@@ -34,6 +34,13 @@ class HistoryTests(unittest.TestCase):
         self.assertIn('监控提示',describe_run({'action':'monitor','status':'finished','result':{'issues':['daily_work_incomplete']}}))
         self.assertIn('失败',describe_run({'action':'cycle','status':'finished','result':{'phase':'retryable_error'}}))
         self.assertIn('失败',describe_run({'action':'cycle','status':'failed','error_type':'TimeoutError'}))
+
+    def test_connection_failure_is_distinct_from_query_failure(self):
+        record={'action':'cycle','status':'finished','result':{'phase':'retryable_error'},
+                'activity':{'outcome':'connection_error'}}
+        self.assertEqual(describe_run(record),'QMT连接失败，待恢复')
+        record['activity']['outcome']='query_error'
+        self.assertEqual(describe_run(record),'查询未完成，待重试')
 
     def test_history_reads_all_types_and_keeps_bad_receipt_visible(self):
         with tempfile.TemporaryDirectory() as folder:

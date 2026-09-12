@@ -1,5 +1,9 @@
+# Definitions only. Nothing is registered, enabled or started by dot-sourcing.
+. (Join-Path $PSScriptRoot 'task_identity.ps1')
 function New-IpoTaskDefinitions {
-    param([string]$Root,[string]$User,[datetime]$StartDay=(Get-Date).Date)
+    param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$User,
+          [datetime]$StartDay=([TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([datetime]::UtcNow,'China Standard Time')).Date)
+    $Root=Convert-IpoPath $Root
     $principal=New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
     $settings=New-ScheduledTaskSettingsSet -Disable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 4) -StartWhenAvailable -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $specs=@(
@@ -9,19 +13,22 @@ function New-IpoTaskDefinitions {
         @{Name='QmtIPO3-Backup';Action='backup';At='16:20';Duration=0;Interval=0}
     )
     foreach($spec in $specs){
-        $at=$StartDay.Add([timespan]::Parse($spec.At))
+        $at=$StartDay.Date.Add([timespan]::Parse($spec.At))
         $daily=New-ScheduledTaskTrigger -Daily -At $at
+        # Explicit exchange timezone, independent of Windows display timezone/DST.
+        $daily.StartBoundary=$at.ToString("yyyy-MM-dd'T'HH:mm:ss")+'+08:00'
         if($spec.Interval){
             $repeat=New-ScheduledTaskTrigger -Once -At $at -RepetitionInterval (New-TimeSpan -Minutes $spec.Interval) -RepetitionDuration (New-TimeSpan -Minutes $spec.Duration)
             $daily.Repetition=$repeat.Repetition
         }
         $triggers=@($daily)
         if($spec.Action -eq 'cycle'){
-            $triggers+=(New-ScheduledTaskTrigger -Daily -At $StartDay.AddHours(15).AddMinutes(5))
+            $final=New-ScheduledTaskTrigger -Daily -At $StartDay.Date.AddHours(15).AddMinutes(5)
+            $final.StartBoundary=$StartDay.ToString('yyyy-MM-dd')+'T15:05:00+08:00'
+            $triggers+=$final
             $triggers+=(New-ScheduledTaskTrigger -AtLogOn -User $User)
         }
-        $arguments='//B "'+(Join-Path $Root 'hidden.vbs')+'" "'+(Join-Path $Root 'run_scheduled.ps1')+'" '+$spec.Action
-        $action=New-ScheduledTaskAction -Execute 'C:/Windows/System32/wscript.exe' -Argument $arguments -WorkingDirectory $Root
-        [pscustomobject]@{Name=$spec.Name;Task=(New-ScheduledTask -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description '自动新股新债申购V3；由Owner一次性启用，周期处理未完成项目，已提交委托不重报。')}
+        $action=New-ScheduledTaskAction -Execute (Join-Path $Root '.venv/Scripts/pythonw.exe') -Argument (Get-IpoArguments $Root $spec.Action) -WorkingDirectory $Root
+        [pscustomobject]@{Name=$spec.Name;Task=(New-ScheduledTask -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description 'QMT IPO: disabled until explicit user authorization; durable intent; no uncertain-order resubmission.')}
     }
 }
