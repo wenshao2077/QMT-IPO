@@ -1,7 +1,9 @@
 # Offline Windows definitions/quoting checks. NEVER register, enable or run a task.
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'tasks.ps1')
-$root=Join-Path $env:TEMP ([string][char]0x4e2d+[string][char]0x6587+' IPO Space')
+$root=Convert-IpoPath (Join-Path $env:TEMP ([string][char]0x4e2d+[string][char]0x6587+' IPO Space'))
+# PS5.1 expands existing 8.3 ancestors in GetFullPath. Build the synthetic
+# legacy action from that same canonical root, as the installer does.
 $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
 $defs=@(New-IpoTaskDefinitions -Root $root -User $user -StartDay ([datetime]'2026-09-14'))
 if($defs.Count -ne 4){throw 'Expected four tasks'}
