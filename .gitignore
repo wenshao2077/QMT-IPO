@@ -45,3 +45,9 @@ staging*/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Portable install state and maintenance artifacts
+state/
+maintenance.json
+installed-source.json
+*.lock

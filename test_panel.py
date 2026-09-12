@@ -104,6 +104,28 @@ class UiTests(unittest.TestCase):
         self.ui.render(snapshot());self.ui.check()
         self.ui.async_job.call_args.args[1]()
         self.backend.check_connection.assert_called_once();self.backend.change.assert_not_called()
+    def test_suppressed_notifications_are_not_presented_as_delivered(self):
+        row=snapshot();row['suppressed_notifications']=3
+        self.ui.render(row)
+        self.assertIn('已抑制',self.ui.cards['notify']['text'])
+        self.assertNotIn('已送达',self.ui.cards['notify']['text'])
+    def test_validation_never_dispatches_notification_send(self):
+        self.ui.render(snapshot());self.ui.validate_configuration()
+        self.ui.async_job.call_args.args[1]()
+        self.backend.validate_configuration.assert_called_once()
+        self.backend.test_notification.assert_not_called()
+        self.backend.change.assert_not_called()
+    def test_notification_test_cancel_never_sends(self):
+        self.ui.render(snapshot());self.ui.test_notification()
+        self.confirm.assert_called_once()
+        self.ui.async_job.assert_not_called()
+        self.backend.test_notification.assert_not_called()
+    def test_notification_test_requires_explicit_confirmed_send(self):
+        self.confirm.return_value=True
+        self.ui.render(snapshot());self.ui.test_notification()
+        self.ui.async_job.call_args.args[1]()
+        self.backend.test_notification.assert_called_once_with(confirmed=True)
+        self.backend.change.assert_not_called()
     def test_layout_has_no_hidden_primary_action(self):
         self.root.deiconify();self.root.update()
         if not self.root.winfo_viewable():self.skipTest('SSH service session cannot map a visible desktop; live panel smoke checks layout')

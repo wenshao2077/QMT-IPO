@@ -3,6 +3,7 @@ import queue
 import re
 
 from mini_base import MiniBroker
+from privacy import redact
 
 
 class Broker(MiniBroker):
@@ -24,8 +25,7 @@ class Broker(MiniBroker):
         self.trader.register_callback(self.callback)
 
     def clean(self,value):
-        text=re.sub(r'https?://\S+','[URL]',str(value))
-        return text.replace(self.config['account_id'],'[ACCOUNT]')[:400]
+        return redact(value, self.config)[:400]
 
     def ready(self):
         statuses=self.trader.query_account_status()

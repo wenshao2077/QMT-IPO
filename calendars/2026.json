@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "markets": [
+    "SH",
+    "SZ"
+  ],
+  "year": 2026,
+  "complete_year": true,
+  "covered_from": "2026-01-01",
+  "covered_through": "2026-12-31",
+  "source": {
+    "kind": "exchange_annual",
+    "reviewed_on": "2026-09-12",
+    "announcements": {
+      "SH": {
+        "url": "https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml",
+        "title": "关于上海证券交易所2026年部分节假日休市安排的通知",
+        "notice_id": "上证公告〔2025〕45号",
+        "published_on": "2025-12-22"
+      },
+      "SZ": {
+        "url": "https://investor.szse.cn/disclosure/notice/general/t20251222_618087.html",
+        "title": "关于2026年部分节假日休市安排的通知",
+        "notice_id": "深证会〔2025〕481号",
+        "published_on": "2025-12-22"
+      }
+    }
+  },
+  "holidays": {
+    "new_year": [
+      "2026-01-01",
+      "2026-01-03"
+    ],
+    "spring_festival": [
+      "2026-02-15",
+      "2026-02-23"
+    ],
+    "qingming": [
+      "2026-04-04",
+      "2026-04-06"
+    ],
+    "labour": [
+      "2026-05-01",
+      "2026-05-05"
+    ],
+    "dragon_boat": [
+      "2026-06-19",
+      "2026-06-21"
+    ],
+    "mid_autumn": [
+      "2026-09-25",
+      "2026-09-27"
+    ],
+    "national": [
+      "2026-10-01",
+      "2026-10-07"
+    ]
+  },
+  "extra_closures": [],
+  "sha256": "ef217a64d3cd44c4753046ad34e62fd78466518e9a0472da5222b53c3b52f7bd"
+}
