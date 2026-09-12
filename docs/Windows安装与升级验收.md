@@ -5,6 +5,7 @@
 ## 修正内容
 
 - 路径测试改为比较实际 argv 和 cwd，不再比较 Mock 的转义调试字符串。
+- CI 补证：Windows runner 的短路径别名先 resolve 后比较；Linux 字体差异用按钮实际请求宽度判断是否裁切，不沿用固定 Windows 像素阈值。两项均仅修正测试口径。
 - Windows PowerShell 5.1 通过 `-File` 启动时，参数默认值中的 `$PSScriptRoot` 未能提供源码目录；将默认值初始化移到脚本主体。增加真实 `powershell.exe -File` 拒绝同源同目标的无副作用回归检查。
 - 申购数量、价格、范围、时段及持久化去重逻辑未改变。
 

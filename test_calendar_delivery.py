@@ -373,7 +373,7 @@ class CalendarDeliveryTests(unittest.TestCase):
         atomic_json(root/'config.json',self.cfg)
         args=launch_command(root,'cycle')
         self.assertEqual(args[3],'cycle')
-        self.assertIn(str(root/'config.json'),args)
+        self.assertIn(str(root.resolve()/'config.json'),args)
         fake=Mock(return_value=Mock(returncode=0))
         launch(root,'notify',fake)
         self.assertNotIn('shell',fake.call_args.kwargs)

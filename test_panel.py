@@ -132,7 +132,9 @@ class UiTests(unittest.TestCase):
         for name in ('enable','pause','check','logs'):
             widget=self.ui.buttons[name]
             self.assertTrue(widget.winfo_ismapped())
-            self.assertGreater(widget.winfo_width(),120)
+            # Font metrics differ across runners; require the whole requested
+            # button (text + padding), not a fixed Windows pixel threshold.
+            self.assertGreaterEqual(widget.winfo_width(),widget.winfo_reqwidth())
             self.assertLess(widget.winfo_rootx()+widget.winfo_width(),self.root.winfo_rootx()+self.root.winfo_width()+1)
         self.assertGreater(self.ui.run_table.winfo_height(),120)
 
