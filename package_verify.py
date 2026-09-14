@@ -17,7 +17,8 @@ MAX_ARCHIVE = 32 * 1024 * 1024
 MAX_MEMBER = 2 * 1024 * 1024
 MAX_TOTAL = 32 * 1024 * 1024
 METADATA = {'DELIVERY_MANIFEST.json', 'SOURCE_IDENTITY.json', 'COMPONENTS.json'}
-ANCILLARY = {'.gitattributes', '.gitignore', '.github/workflows/offline.yml'}
+ANCILLARY = {'.gitattributes', '.gitignore', '.github/workflows/offline.yml', '.github/workflows/delivery-materials.yml',
+             '.github/workflows/delivery-entry-smoke.yml', '.github/workflows/runtime-smoke.yml'}
 REQUIRED = {'app.py', 'market_calendar.py', 'tasks.ps1', 'panel_tasks.ps1'}
 
 

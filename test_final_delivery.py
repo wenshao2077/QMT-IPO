@@ -91,6 +91,24 @@ class DirectoryTests(unittest.TestCase):
         (self.source/'unlisted.py').write_text('# no execution')
         with self.assertRaises(PackageError):verify_directory(self.source)
 
+    def test_merged_delivery_workflows_are_packaged_and_hash_checked(self):
+        workflow_names = ('delivery-materials.yml', 'delivery-entry-smoke.yml', 'runtime-smoke.yml')
+        workflows = self.source/'.github/workflows'
+        workflows.mkdir(parents=True)
+        for name in workflow_names:
+            (workflows/name).write_text('name: isolated fixture\n', encoding='utf-8')
+        archive = self.root/'merged.zip'
+        build(self.source, archive)
+        with zipfile.ZipFile(archive) as bundle:
+            bundle.extractall(self.root/'merged')
+        merged = next((self.root/'merged').iterdir())
+        self.assertTrue(verify_directory(merged)['ok'])
+        for name in workflow_names:
+            self.assertTrue((merged/'.github/workflows'/name).is_file())
+        (merged/'.github/workflows'/workflow_names[0]).write_text('changed', encoding='utf-8')
+        with self.assertRaises(PackageError):
+            verify_directory(merged)
+
 
 class WheelsTests(unittest.TestCase):
     def setUp(self):

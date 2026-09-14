@@ -6,12 +6,15 @@
   "production_acceptance": false,
   "dependency_binaries_included": false,
   "publisher_signature_included": false,
-  "manifest_sha256": "29d5f81f931ce9476cbc55dfa1392750216528079c32a74f0d59ec0ca75efb64",
+  "manifest_sha256": "683a9574dbf85394e2cbfe36028c0465d687c7ee7347f5e18607fc3245b00cef",
   "baseline_package_sha256": "a7cc568ff8bdd2258b374aaae91a212cce936ada52dddc0fd7dcc595ea243e5d",
   "components_sha256": "f9b85fd0369376c35edc3e31521191e52f25a0ca757df04394500e246d6cd60e",
   "ancillary_sha256": {
     ".gitattributes": "d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c",
     ".gitignore": "74974716aec90ae1ffa89feeabba23e32ab83af4237aa3443ef612aea709d327",
-    ".github/workflows/offline.yml": "fcf8835d6228d9493d307d5dcbe2a7355c8ffe535da81d7fbd9b2abc06ac8d12"
+    ".github/workflows/offline.yml": "497ec45a7c6d0d6c5b3d9479fedc7e9fdc99e46d4aa9e7c307d0b2c1ea7a5233",
+    ".github/workflows/delivery-materials.yml": "4cf1a9d9adf31d5da0285bb1d1f618d1ee763d64d7df037ccc88eaee12728420",
+    ".github/workflows/delivery-entry-smoke.yml": "92b8755c07a3b28bf6f648ab6570bbade11a0dda6eb2b8f43f2c17dbb8fc3679",
+    ".github/workflows/runtime-smoke.yml": "5e59401126174533bbe7c4533f5d3f98e462413c321e2de694c58d8aced3392c"
   }
 }

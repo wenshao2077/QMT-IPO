@@ -12,7 +12,8 @@ import zipfile
 from installer import payload, MANIFEST
 from release_info import VERSION, BASE_COMMIT, BASELINE_PACKAGE_SHA256, PINNED_DEPENDENCIES
 
-ANCILLARY = ('.gitattributes', '.gitignore', '.github/workflows/offline.yml')
+ANCILLARY = ('.gitattributes', '.gitignore', '.github/workflows/offline.yml', '.github/workflows/delivery-materials.yml',
+             '.github/workflows/delivery-entry-smoke.yml', '.github/workflows/runtime-smoke.yml')
 
 
 def build(source, output):
