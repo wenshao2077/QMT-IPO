@@ -1,0 +1,52 @@
+{
+  "wheels": [
+    {
+      "name": "xtquant",
+      "version": "250807.1.2",
+      "filename": "xtquant-250807.1.2-py3-none-any.whl",
+      "sha256": "91f19ff9a92971c5abe64fbd077e5212e0418f0820aa3427aef3444230f72921"
+    },
+    {
+      "name": "numpy",
+      "version": "1.26.4",
+      "filename": "numpy-1.26.4-cp311-cp311-win_amd64.whl",
+      "sha256": "cd25bcecc4974d09257ffcd1f098ee778f7834c3ad767fe5db785be9a4aa9cb2"
+    },
+    {
+      "name": "pandas",
+      "version": "2.2.3",
+      "filename": "pandas-2.2.3-cp311-cp311-win_amd64.whl",
+      "sha256": "3fc6873a41186404dad67245896a6e440baacc92f5b716ccd1bc9ed2995ab2c5"
+    },
+    {
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "filename": "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "sha256": "a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427"
+    },
+    {
+      "name": "pytz",
+      "version": "2025.2",
+      "filename": "pytz-2025.2-py2.py3-none-any.whl",
+      "sha256": "5ddf76296dd8c44c26eb8f4b6f35488f3ccbf6fbbd7adee0b7262d43f0ec2f00"
+    },
+    {
+      "name": "tzdata",
+      "version": "2025.2",
+      "filename": "tzdata-2025.2-py2.py3-none-any.whl",
+      "sha256": "1a403fada01ff9221ca8044d701868fa132215d84beb92242d9acd2147f667a8"
+    },
+    {
+      "name": "six",
+      "version": "1.17.0",
+      "filename": "six-1.17.0-py2.py3-none-any.whl",
+      "sha256": "4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274"
+    }
+  ],
+  "runtime": {
+    "version": "3.11.16",
+    "filename": "cpython-3.11.16+20260901-x86_64-pc-windows-msvc-install_only.tar.gz",
+    "sha256": "6be524fa6752af802146a4adc7d098565425b0b1c166e19a5a7a4c8cccb86bf6"
+  },
+  "schema_version": 1
+}

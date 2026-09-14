@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
-  "version": "3.4.0-alpha2",
+  "version": "3.4.0",
   "base_commit": "bd667bf8dd072e8467b91432f1eb9986bce43e15",
-  "artifact_kind": "review_source_candidate",
+  "artifact_kind": "source_delivery",
   "production_acceptance": false,
   "dependency_binaries_included": false,
   "publisher_signature_included": false,
-  "manifest_sha256": "9c010acffba76adf075ef7d0b9162bff98a7306e15ae258554ea248de5d143b8",
+  "manifest_sha256": "29d5f81f931ce9476cbc55dfa1392750216528079c32a74f0d59ec0ca75efb64",
   "baseline_package_sha256": "a7cc568ff8bdd2258b374aaae91a212cce936ada52dddc0fd7dcc595ea243e5d",
-  "components_sha256": "1de6c6041edba315463cc2e61374f0802f199afafa38c9ce6ca99af7769db965",
+  "components_sha256": "f9b85fd0369376c35edc3e31521191e52f25a0ca757df04394500e246d6cd60e",
   "ancillary_sha256": {
     ".gitattributes": "d60f352d0db1404c70afb4bb8b2ca3fd1c610572aa40720e8a0b7baa7885418c",
     ".gitignore": "74974716aec90ae1ffa89feeabba23e32ab83af4237aa3443ef612aea709d327",
-    ".github/workflows/offline.yml": "65c33344df3c56a6d8a2fbd64ae703edd9068d87d4297f7e5655234a03023495"
+    ".github/workflows/offline.yml": "fcf8835d6228d9493d307d5dcbe2a7355c8ffe535da81d7fbd9b2abc06ac8d12"
   }
 }

@@ -1,5 +1,5 @@
-"""Build identity for the second delivery iteration; not a production release."""
-VERSION = '3.4.0-alpha2'
+"""Unified source/offline delivery identity; broker acceptance remains separate."""
+VERSION = '3.4.0'
 BASE_COMMIT = 'bd667bf8dd072e8467b91432f1eb9986bce43e15'
 DEPLOY_SCHEMA_VERSION = 1
 VERIFIED_PYTHON = (3, 11)

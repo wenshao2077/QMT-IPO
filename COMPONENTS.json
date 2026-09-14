@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "3.4.0-alpha2",
+  "version": "3.4.0",
   "inventory_kind": "declared_direct_runtime_dependencies_not_full_transitive_SBOM",
   "dependency_binaries_included": false,
   "components": [

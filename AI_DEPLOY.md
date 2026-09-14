@@ -1,4 +1,6 @@
-# AI 部署协议（3.4.0-alpha2）
+# AI 部署协议（3.4.0）
+
+本版有源码包和 Windows 离线包。离线包先用顶层 setup.ps1 VerifyPackage，再 Plan；New/ResumeNew 自动使用已校验持久 Python 缓存和本地 hash-locked wheels，不访问包索引。Upgrade/Rollback 需要已获准的 -ConfirmMaintenance，保持原虚拟环境。详细操作以 docs/FINAL_DELIVERY.md 为准。下文自备 Python、联网安装依赖的说明仅适用于源码包。
 
 本文件供具有本机文件/命令权限的部署代理使用。只聊天而没有本机执行能力的 AI 可以指导，不能报告“已部署”。完整操作集合、字段和权限见 DEPLOY_PROTOCOL.json。统一入口是解压后源码目录的 setup.ps1；不要临场改写安装器。
 

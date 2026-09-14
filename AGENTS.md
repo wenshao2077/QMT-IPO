@@ -1,6 +1,6 @@
-# AGENTS — 第二阶段交付迭代与部署边界
+# AGENTS — 3.4.0 最终交付与部署边界
 
-适用于整个源码包。版本 3.4.0-alpha2，基线 `bd667bf8dd072e8467b91432f1eb9986bce43e15`。优先读 README、AI_DEPLOY、DEPLOY_PROTOCOL 和本輪实际测试记录；历史通过不能移用为本轮结论。
+适用于整个源码包。版本 3.4.0，基线 `bd667bf8dd072e8467b91432f1eb9986bce43e15`。优先读 docs/FINAL_DELIVERY.md、docs/ROUND3.md、README、AI_DEPLOY、DEPLOY_PROTOCOL 和本轮实际测试记录；历史通过不能移用为本轮结论。
 
 ## 部署代理
 
@@ -22,7 +22,7 @@
 
 第一阶段的业务差异是有限时点再查询；本轮不修改该规则，不改变市场集合、申报时段、价格、数量、最小单位、remark 或持久化去重。已完成只代表截至本轮，15:05 只核对。
 
-源码改动后重建 DELIVERY_MANIFEST。提交前执行原四组测试及 test_delivery_round1、test_discovery_round1、test_release_round1、test_maintenance_round2、test_package_round2、test_ui_round2。Linux GUI 使用 Xvfb，Windows 使用可见桌面或离线 runner。报告环境、测试数、失败/跳过及未验证项。不得称 Linux 模拟检查为 Windows 验收通过。
+源码改动后重建 DELIVERY_MANIFEST。提交前执行原四组测试及 test_delivery_round1、test_discovery_round1、test_release_round1、test_maintenance_round2、test_package_round2、test_ui_round2、test_final_delivery。Linux GUI 使用 Xvfb，Windows 使用可见桌面或离线 runner。报告环境、测试数、失败/跳过及未验证项。不得称 Linux 模拟检查为 Windows 验收通过。
 
 源码包中的新建/升级/回滚工具只服务受控本机流程。回滚不能恢复旧委托数据库。安装中断无法证实完整状态时，保留现场并停止；日志和恢复标记不能用成功状态覆盖。
 

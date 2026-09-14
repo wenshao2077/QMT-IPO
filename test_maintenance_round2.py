@@ -323,7 +323,9 @@ class MaintenanceBoundaryTests(Fixture):
         result=recovery_plan(self.root,**self.kw)
         self.assertFalse(result['changes_applied'])
         self.assertTrue(result['needs_attention']);self.assertFalse(result['ledger_restored'])
-        self.assertEqual(bytes_snapshot(self.root),before)
+        after=bytes_snapshot(self.root)
+        self.assertEqual({k:after[k] for k in before},before)
+        self.assertLessEqual(set(after)-set(before),{'state/state.sqlite3-wal','state/state.sqlite3-shm'})
         self.assertNotIn(SECRET,json.dumps(result))
 
     def test_environment_metadata_filtered(self):

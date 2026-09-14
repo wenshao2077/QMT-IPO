@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "entry": "setup.ps1",
-  "version": "3.4.0-alpha2",
+  "version": "3.4.0",
   "operations": {
     "VerifyPackage": {
       "mutates": false,

@@ -5,6 +5,7 @@ param(
     [string]$SourceRoot,
     [string]$PythonExe='py',
     [switch]$InstallDependencies,
+    [string]$Wheelhouse,
     [string]$RollbackId
 )
 $ErrorActionPreference='Stop'
@@ -13,6 +14,7 @@ $ProgressPreference='SilentlyContinue'
 if(-not $SourceRoot){$SourceRoot=$PSScriptRoot}
 $Root=[IO.Path]::GetFullPath($Root)
 $SourceRoot=[IO.Path]::GetFullPath($SourceRoot)
+if($Wheelhouse -and ($Mode -notin @('New','ResumeNew') -or -not $InstallDependencies)){throw 'Wheelhouse requires explicit new-install dependencies'}
 if($Root -eq $SourceRoot){throw 'Source and installation must be separate directories'}
 if($Root.Contains('"')){throw 'Unsupported root quoting characters'}
 . (Join-Path $SourceRoot 'task_identity.ps1')
@@ -79,7 +81,11 @@ if($Mode -in @('New','ResumeNew')){
         Invoke-NewJournal 'verify-fresh' '' | Out-Null
         if($state.stage -eq 'source_ready'){
             if($InstallDependencies){
-                & $python -m pip install --disable-pip-version-check -r (Join-Path $SourceRoot 'requirements.txt')
+                if($Wheelhouse){
+                    & $python -B (Join-Path $SourceRoot 'offline_dependencies.py') --wheelhouse $Wheelhouse
+                }else{
+                    & $python -m pip install --disable-pip-version-check -r (Join-Path $SourceRoot 'requirements.txt')
+                }
                 if($LASTEXITCODE -ne 0){throw 'Dependency installation failed; ResumeNew can retry, no tasks enabled'}
             }
             & $python -B (Join-Path $SourceRoot 'environment_check.py')

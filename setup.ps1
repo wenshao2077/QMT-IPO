@@ -4,6 +4,7 @@ param(
     [string]$Root,
     [string]$PythonExe='py',
     [switch]$InstallDependencies,
+    [string]$Wheelhouse,
     [string]$RollbackId,
     [switch]$Interactive,
     [string]$Output,
@@ -43,6 +44,7 @@ try{
     if($Operation -eq 'VerifyArchive' -and -not $Archive){throw 'archive_required'}
     if($Root){$Root=[IO.Path]::GetFullPath($Root)}
     if($InstallDependencies -and $Operation -notin @('New','ResumeNew')){throw 'dependency_install_only_for_new_or_resume'}
+    if($Wheelhouse -and ($Operation -notin @('New','ResumeNew') -or -not $InstallDependencies)){throw 'wheelhouse_only_for_dependency_install'}
     if($RollbackId -and $Operation -ne 'Rollback'){throw 'rollback_id_only_for_rollback'}
     if($Operation -eq 'Rollback' -and -not $RollbackId){throw 'rollback_id_required'}
     $python=$PythonExe;$pyArgs=@();if($python -eq 'py'){$pyArgs=@('-3.11')}
@@ -55,6 +57,7 @@ try{
         $powershell=Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
         $a=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $source 'install.ps1'),'-Mode',$Operation,'-Root',$Root,'-SourceRoot',$source,'-PythonExe',$PythonExe)
         if($InstallDependencies){$a+='-InstallDependencies'}
+        if($Wheelhouse){$a+=@('-Wheelhouse',$Wheelhouse)}
         if($RollbackId){$a+=@('-RollbackId',$RollbackId)}
         $log=[IO.Path]::GetTempFileName()
         # PS5.1 redirection defaults to UTF-16; choose UTF-8 explicitly for receipts.

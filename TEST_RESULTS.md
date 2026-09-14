@@ -1,6 +1,12 @@
-# 当前测试入口
+# 3.4.0 当前验证记录
 
-3.4.0-alpha1 的本轮结果以 [ROUND1_TEST_RESULTS](docs/ROUND1_TEST_RESULTS.md) 为准。以下保留历史记录，不代表本轮结果。
+2026-09-14，Windows build 26200 x64：原246项加11项缺陷/离线依赖回归，共257项全部通过，0失败、0错误、0跳过。先以隔离 Python 3.11.15 通过256项，追加外部账本导出保护后，以随包 Python 3.11.16 完成257项；最终ZIP解压回归另记于外部验收记录。PS5.1/PS7 均通过四个禁用任务定义、时区/归属和14个PowerShell脚本解析。
+
+本机隔离目录已执行真实离线 New：无预装依赖、固定Python缓存创建、7个锁定wheel安装、pip check、Tk创建/销毁、4个实际注册任务全部Disabled、配置false/占位账号、空通知地址。ResumeNew重复执行返回already_installed。没有导入SDK或连接账户。最新最终ZIP验证、升级回滚/移动包验证、源码提交及哈希以包外验收记录为准，避免将ZIP自身哈希递归写入包内。
+
+命令：`python -B -m unittest discover -v`；`pwsh -File test_tasks.ps1`；`powershell -File test_tasks.ps1`。257项模拟覆盖不等于券商受理。本轮未部署生产、发送消息、触发真实申购；未做全缩放/UAC账号矩阵或强制断电测试。
+
+下文保留3.3历史材料，不代表3.4.0新增验收。
 
 ---
 

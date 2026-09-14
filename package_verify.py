@@ -9,6 +9,7 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 import stat
+import os
 import zipfile
 
 MAX_FILES = 512
@@ -93,6 +94,39 @@ def verify_zip(path, expected_sha256=None):
                 raise PackageError('multiple_package_roots')
     except (zipfile.BadZipFile, RuntimeError, OSError, NotImplementedError) as exc:
         raise PackageError('archive_unreadable') from exc
+    checked = verify_contents(contents, roots)
+    return checked | {'code': 'source_zip_integrity_verified', 'sha256': digest,
+                      'expected_hash_matched': expected_sha256 is not None}
+
+
+def verify_directory(path):
+    """Validate the entire extracted source tree; only Git administration is excluded."""
+    root = Path(path)
+    if root.is_symlink() or not root.is_dir():
+        raise PackageError('source_directory_missing_or_linked')
+    contents, seen = {}, set()
+    for entry in root.rglob('*'):
+        name = entry.relative_to(root).as_posix()
+        if name == '.git' or name.startswith('.git/'):
+            continue
+        safe_name(name)
+        if entry.is_symlink() or (os.name == 'nt' and entry.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+            raise PackageError('linked_source_entry')
+        if entry.is_dir():
+            continue
+        if not entry.is_file() or entry.stat().st_size > MAX_MEMBER:
+            raise PackageError('member_size_or_compression_limit')
+        key = name.casefold()
+        if key in seen:
+            raise PackageError('duplicate_archive_path')
+        seen.add(key)
+        contents[name] = entry.read_bytes()
+        if len(contents) > MAX_FILES or sum(map(len, contents.values())) > MAX_TOTAL:
+            raise PackageError('archive_size_limit')
+    return verify_contents(contents) | {'code': 'source_directory_integrity_verified'}
+
+
+def verify_contents(contents, roots=None):
     if not METADATA <= contents.keys():
         raise PackageError('metadata_missing')
     manifest = _json(contents['DELIVERY_MANIFEST.json'])
@@ -106,7 +140,7 @@ def verify_zip(path, expected_sha256=None):
     version = identity.get('version')
     if not isinstance(version, str) or not re.fullmatch(r'\d+\.\d+\.\d+(?:-[a-z0-9.]+)?', version):
         raise PackageError('version_invalid')
-    if roots != {'QMT-IPO-'+version+'-source'} or manifest.get('version', version) != version:
+    if (roots is not None and roots != {'QMT-IPO-'+version+'-source'}) or manifest.get('version', version) != version:
         raise PackageError('version_identity_mismatch')
     if components.get('version') != version or components.get('artifact_sha256') is not None:
         raise PackageError('component_identity_mismatch')
@@ -135,9 +169,8 @@ def verify_zip(path, expected_sha256=None):
         raise PackageError('ancillary_identity_mismatch')
     if any(hashlib.sha256(contents[n]).hexdigest() != h for n, h in ancillary_hashes.items()):
         raise PackageError('ancillary_hash_mismatch')
-    return {'ok': True, 'code': 'source_zip_integrity_verified', 'version': version,
-            'sha256': digest, 'file_count': len(contents), 'payload_files': len(files),
-            'expected_hash_matched': expected_sha256 is not None,
+    return {'ok': True, 'version': version,
+            'file_count': len(contents), 'payload_files': len(files),
             'publisher_authenticity_verified': False, 'code_executed': False,
             'account_connected': False, 'message_sent': False, 'submission_calls': 0}
 

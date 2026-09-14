@@ -1,7 +1,7 @@
 """Maintainer command: hash the install whitelist, excluding local secrets/state."""
 import hashlib
+import json
 from pathlib import Path
-from runtime import atomic_json
 from installer import destination
 from release_info import BASE_COMMIT, VERSION
 
@@ -19,6 +19,16 @@ SOURCE_FILES = (
     'broker.py',
     'build_manifest.py',
     'build_release.py',
+    'build_distribution.py',
+    'offline_dependencies.py',
+    'dependencies.lock.json',
+    'requirements-offline.txt',
+    'delivery/setup.ps1',
+    'delivery/verify.ps1',
+    'delivery/start.ps1',
+    'docs/FINAL_DELIVERY.md',
+    'docs/ROUND3.md',
+    'test_final_delivery.py',
     'calendar_health.py',
     'calendar_tool.py',
     'calendars/2026.json',
@@ -103,7 +113,13 @@ def build(root):
         try:destination(name)
         except ValueError:continue
         files[name]=hashlib.sha256(path.read_bytes()).hexdigest()
-    atomic_json(root/'DELIVERY_MANIFEST.json',{'schema_version':1,'version':VERSION,'base_commit':BASE_COMMIT,'files':files})
+    # Source metadata must hash identically after Git's LF checkout on every OS.
+    data={'schema_version':1,'version':VERSION,'base_commit':BASE_COMMIT,'files':files}
+    (root/'DELIVERY_MANIFEST.json').write_bytes((json.dumps(data,ensure_ascii=False,indent=2)+'\n').encode('utf-8'))
+    from build_release import source_contents
+    contents = source_contents(root)
+    for name in ('SOURCE_IDENTITY.json', 'COMPONENTS.json'):
+        (root/name).write_bytes(contents[name])
     return files
 
 

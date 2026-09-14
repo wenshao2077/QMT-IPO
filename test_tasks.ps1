@@ -31,7 +31,7 @@ $legacy=[pscustomobject]@{Actions=@([pscustomobject]@{
     Arguments=('//B "'+(Join-Path $root 'hidden.vbs')+'" "'+(Join-Path $root 'run_scheduled.ps1')+'" cycle')})}
 Assert-IpoOwnedTask $legacy $root 'cycle'
 $script:count=0
-foreach($path in Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1'){
+foreach($path in Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -Recurse){
     $tokens=$null;$errors=$null
     [void][Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText($path.FullName,[Text.Encoding]::UTF8),[ref]$tokens,[ref]$errors)
     if($errors.Count){throw ('PowerShell syntax failed: '+$path.Name+': '+$errors[0].Message)}

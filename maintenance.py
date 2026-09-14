@@ -24,7 +24,7 @@ from calendar_health import coverage_report
 from environment_check import environment_report
 from notification_policy import combined_notification_stats
 from release_info import VERSION
-from runtime import validate_config
+from runtime import validate_config, validate_config_shape
 from support import CHINA, china_now
 
 MAX_JSON_BYTES = 256 * 1024
@@ -191,7 +191,6 @@ def status_report(root, *, now=None, environment_provider=None, task_provider=No
             issues.append('installation_state_unreadable')
     try:
         # Diagnose interrupted writes without granting runtime permission.
-        from runtime import validate_config_shape
         config = validate_config_shape(read_local_json(root/'config.json'))
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, AttributeError):
         issues.append('configuration_unreadable')
@@ -258,7 +257,7 @@ def export_support(root, output, *, confirmed=False, **kwargs):
     resolved = output.resolve()
     protected = [root]
     try:
-        config = validate_config(read_local_json(root/'config.json'))
+        config = validate_config_shape(read_local_json(root/'config.json'))
         protected += [Path(config[k]).resolve() for k in ('state_dir','control_dir','qmt_userdata')]
     except (OSError, ValueError, TypeError, KeyError, UnicodeError, AttributeError):
         pass

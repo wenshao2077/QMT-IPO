@@ -21,6 +21,12 @@ def build(source, output):
         raise ValueError('Build outside the source/installation directory')
     if output.exists():
         raise ValueError('Refuse overwriting an existing release artifact')
+    contents = source_contents(source)
+    return write_archive(contents, output)
+
+
+def source_contents(source):
+    source = Path(source).resolve()
     payload(source)  # Hash, path and required-file validation before producing bytes.
     manifest = json.loads((source/MANIFEST).read_text(encoding='utf-8-sig'))
     names = sorted(set(manifest['files']) | {MANIFEST})
@@ -40,13 +46,17 @@ def build(source, output):
                   'runtime':{'name':'CPython','version_requirement':'3.11.x x64 with Tk', 'bundled':False}}
     contents['COMPONENTS.json']=(json.dumps(components,ensure_ascii=False,indent=2)+'\n').encode()
     identity = {'schema_version':1, 'version':VERSION, 'base_commit':BASE_COMMIT,
-                'artifact_kind':'review_source_candidate', 'production_acceptance':False,
+                'artifact_kind':'source_delivery', 'production_acceptance':False,
                 'dependency_binaries_included':False, 'publisher_signature_included':False,
                 'manifest_sha256':hashlib.sha256(contents[MANIFEST]).hexdigest(),
                 'baseline_package_sha256':BASELINE_PACKAGE_SHA256,
                 'components_sha256':hashlib.sha256(contents['COMPONENTS.json']).hexdigest(),
                 'ancillary_sha256':{n:hashlib.sha256(contents[n]).hexdigest() for n in ANCILLARY if n in contents}}
     contents['SOURCE_IDENTITY.json'] = (json.dumps(identity,ensure_ascii=False,indent=2)+'\n').encode()
+    return contents
+
+
+def write_archive(contents, output):
     output.parent.mkdir(parents=True,exist_ok=True)
     # Exclusive creation avoids overwrites; remove only this build's partial file.
     created=False
@@ -68,7 +78,7 @@ def build(source, output):
         if created:
             output.unlink(missing_ok=True)
         raise
-    return {'ok':True,'artifact_kind':'review_source_candidate','version':VERSION,
+    return {'ok':True,'artifact_kind':'source_delivery','version':VERSION,
             'file_count':len(contents),'sha256':hashlib.sha256(output.read_bytes()).hexdigest()}
 
 

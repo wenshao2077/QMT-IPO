@@ -329,6 +329,10 @@ class DeliveryRoundOneTests(unittest.TestCase):
         self.assertFalse(installation_plan(self.source,self.source)['ok'])
 
     def test_deployment_package_json_is_single_and_non_sensitive(self):
+        from build_release import source_contents
+        for name, data in source_contents(self.source).items():
+            if name in ('SOURCE_IDENTITY.json', 'COMPONENTS.json'):
+                (self.source/name).write_bytes(data)
         output=io.StringIO()
         with redirect_stdout(output):rc=deploy_main(['verify-package','--source',str(self.source)])
         self.assertEqual(rc,0)

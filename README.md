@@ -1,8 +1,8 @@
-# QMT 自动打新助手 3.4.0-alpha2
+# QMT 自动打新助手 3.4.0
 
-**第二阶段完整源码候选包。第一阶段alpha1已由用户确认验收；本alpha2增量尚未在本轮执行Windows实机验收。**
+**三阶段整合的最终源码交付；另提供面向本机使用的 Windows 离线包。** 当前操作与交付说明见 [最终交付](docs/FINAL_DELIVERY.md)，第三阶段追溯见 [ROUND3](docs/ROUND3.md)，最新验证见 TEST_RESULTS.md。历史 alpha1/alpha2 记录不代表当前测试。
 
-基线是已验收的alpha1完整ZIP，不是GitHub旧main或仅版本标识的分支。基线包SHA-256、改动和限制见 `docs/ROUND2.md`；实际测试见 `docs/ROUND2_TEST_RESULTS.md`；Windows增量清单见 `docs/WINDOWS_ROUND2_ACCEPTANCE.md`。历史验收范围不自动扩写为当前版本的实盘认证。
+本版整合已交付 alpha2 源码、远端第三阶段离线入口和本地验收修复。下文安装命令针对源码包（自行准备 Python）；离线包在顶层双击“开始安装.cmd”，自带固定 Python 与全部锁定 wheels，安装不访问包索引。已有实例升级保持原解释器、配置、任务开关和账本。
 
 人工先打开 `使用说明.html`；AI 先读 `AGENTS.md` 和 `AI_DEPLOY.md`。本包是完整源码候选包，不是补丁，不需要逐文件覆盖现有安装。
 
@@ -88,7 +88,7 @@ ResumeNew 不等于重新安装。缺失账本、账本已写入意图、存在�
 
 ```text
 python -B -c "from installer import payload; payload('.')"
-xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2
+xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery
 ```
 
 Windows 下省略 `xvfb-run -a`，并运行 `test_tasks.ps1` 的禁用任务定义/脚本解析测试；它不注册、不启用任务。真实 Windows 安装/UAC/快捷方式/恢复仍是独立验收。

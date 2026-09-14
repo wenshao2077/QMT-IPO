@@ -45,6 +45,10 @@ def destination(name):
         return Path(name)
     if p.parts[0] == 'docs' and p.suffix == '.md':
         return Path(name)
+    if p.parts[0] == 'delivery' and len(p.parts) == 2 and p.suffix == '.ps1':
+        return Path(name)
+    if name in ('dependencies.lock.json', 'requirements-offline.txt'):
+        return Path(name)
     raise ValueError('File is outside the install whitelist')
 
 
