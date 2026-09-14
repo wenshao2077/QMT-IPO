@@ -1,0 +1,60 @@
+name: Windows offline runtime smoke (no account access)
+on:
+  push:
+    branches: ['master']
+    paths: ['.github/workflows/runtime-smoke.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  materials:
+    uses: ./.github/workflows/delivery-materials.yml
+  runtime:
+    needs: materials
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: round3-materials-review
+          path: materials
+      - name: Verify archive, create private venv, install exact wheels offline
+        shell: python
+        run: |
+          import hashlib,json,os,pathlib,subprocess,tarfile,tempfile
+          materials=pathlib.Path('materials').resolve()
+          provenance=json.loads((materials/'provenance.json').read_text(encoding='utf-8'))
+          for row in provenance['records']:
+              assert hashlib.sha256((materials/row['filename']).read_bytes()).hexdigest()==row['sha256']
+          runtime=next(r for r in provenance['records'] if r['kind']=='runtime')
+          assert runtime['sha256']=='6be524fa6752af802146a4adc7d098565425b0b1c166e19a5a7a4c8cccb86bf6'
+          root=pathlib.Path(tempfile.mkdtemp(prefix='QMT offline runtime '))
+          with tarfile.open(materials/runtime['filename']) as archive:
+              for member in archive.getmembers():
+                  p=pathlib.PurePosixPath(member.name)
+                  assert not p.is_absolute() and '..' not in p.parts and not member.issym() and not member.islnk()
+              archive.extractall(root,filter='data')
+          py=root/'python/python.exe'; env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1';env['PIP_CONFIG_FILE']=os.devnull
+          for key in ('PYTHONPATH','PYTHONHOME'):env.pop(key,None)
+          subprocess.run([str(py),'-I','-B','-m','venv',str(root/'venv')],check=True,env=env)
+          vp=root/'venv/Scripts/python.exe'
+          lock=root/'requirements.lock.txt'
+          wheels=[r for r in provenance['records'] if r['kind']=='wheel']
+          lock.write_text(''.join(r['name']+'=='+r['version']+' --hash=sha256:'+r['sha256']+'\n' for r in wheels),encoding='utf-8')
+          subprocess.run([str(vp),'-I','-B','-m','pip','--isolated','--disable-pip-version-check','install','--no-index','--find-links',str(materials),'--require-hashes','--only-binary=:all:','--no-cache-dir','-r',str(lock)],check=True,env=env)
+          subprocess.run([str(vp),'-I','-B','-m','pip','--isolated','check'],check=True,env=env)
+          probe='import sys,json,sqlite3,struct,tkinter,importlib.metadata as m; root=tkinter.Tk();root.withdraw();root.update();root.destroy();print(json.dumps(dict(python=sys.version.split()[0],bits=struct.calcsize("P")*8,sqlite=sqlite3.sqlite_version,tk=tkinter.TkVersion,xtquant=m.version("xtquant"),numpy=m.version("numpy"),pandas=m.version("pandas"),sdk_imported="xtquant" in sys.modules)))'
+          result=subprocess.run([str(vp),'-I','-B','-c',probe],check=True,env=env,capture_output=True,text=True)
+          facts=json.loads(result.stdout);assert facts['python']=='3.11.16' and facts['bits']==64 and facts['sdk_imported'] is False
+          report={'ok':True,'runtime_sha256':runtime['sha256'],'facts':facts,'offline_pip_install':True,'pip_check':True,'tk_created_and_destroyed':True,'account_connected':False,'message_sent':False,'submission_calls':0,'scope':'runtime and metadata only; not full application installer or broker acceptance'}
+          pathlib.Path('runtime-smoke-result.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(report))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: round3-runtime-smoke
+          path: runtime-smoke-result.json
+          retention-days: 14

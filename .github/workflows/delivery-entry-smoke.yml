@@ -1,0 +1,93 @@
+name: Final entry and private runtime smoke
+on:
+  push:
+    branches: ['master']
+    paths: ['.github/workflows/delivery-entry-smoke.yml', 'delivery/verify.ps1', 'delivery/setup.ps1']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  materials:
+    uses: ./.github/workflows/delivery-materials.yml
+  entry:
+    needs: materials
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [powershell, pwsh]
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: round3-materials-review
+          path: materials
+      - name: Exercise exact delivery scripts with a non-trading payload stub
+        shell: python
+        env:
+          TEST_PS: ${{ matrix.shell }}
+        run: |
+          import hashlib,json,os,pathlib,shutil,subprocess,tarfile,tempfile
+          repo=pathlib.Path.cwd(); materials=repo/'materials'; base=pathlib.Path(tempfile.mkdtemp(prefix='QMT entry 中文 空格 ')); package=base/'package'; package.mkdir(); (package/'runtime').mkdir();(package/'release').mkdir();(package/'payload').mkdir()
+          def h(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+          def write(p,v):p.write_text(json.dumps(v,ensure_ascii=False,indent=2),encoding='utf-8')
+          runtime=next(materials.glob('cpython-3.11.16+*-install_only.tar.gz'))
+          assert h(runtime)=='6be524fa6752af802146a4adc7d098565425b0b1c166e19a5a7a4c8cccb86bf6'
+          with tarfile.open(runtime) as t:t.extractall(package/'runtime',filter='data')
+          for name in ('setup.ps1','verify.ps1'):shutil.copyfile(repo/'delivery'/name,package/name)
+          stub="param([string]$Operation,[string]$Root,[string]$PythonExe,[switch]$InstallDependencies,[string]$Wheelhouse,[string]$RollbackId,[string]$Output,[switch]$ConfirmExport)\n[Console]::OutputEncoding=[Text.Encoding]::UTF8\n@{ok=$true;operation=$Operation;root=$Root;python=$PythonExe;dependencies=[bool]$InstallDependencies;wheelhouse=$Wheelhouse;account_connected=$false;message_sent=$false;submission_calls=0}|ConvertTo-Json -Compress\nexit 0\n"
+          (package/'payload/setup.ps1').write_text(stub,encoding='utf-8-sig');(package/'payload/install.ps1').write_text('# STUB; no installation or task actions\n');(package/'payload/dependencies.lock.json').write_text('{}')
+          rfiles={p.relative_to(package/'runtime/python').as_posix():{'sha256':h(p),'size':p.stat().st_size} for p in (package/'runtime/python').rglob('*') if p.is_file()}
+          write(package/'release/runtime-manifest.json',{'schema_version':1,'python_version':'3.11.16','target':'x86_64-pc-windows-msvc','files':rfiles})
+          write(package/'release/version.json',{'version':'3.4.0','python_bundled':True,'offline_dependencies_bundled':True,'publisher_signature_included':False})
+          files={p.relative_to(package).as_posix():{'sha256':h(p),'size':p.stat().st_size} for p in package.rglob('*') if p.is_file()}
+          write(package/'release/manifest.json',{'schema_version':3,'version':'3.4.0','artifact_kind':'windows_offline_distribution','files':files})
+          ps=shutil.which(os.environ['TEST_PS']);env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1'
+          def run(args,ok=True):
+              p=subprocess.run(args,capture_output=True,text=True,encoding='utf-8-sig',errors='replace',env=env,timeout=180)
+              if (p.returncode==0)!=ok:raise AssertionError((args,p.returncode,p.stdout,p.stderr))
+              return p
+          def entry(op,root=None,*extra,ok=True):
+              args=[ps,'-NoProfile','-ExecutionPolicy','Bypass','-File',str(package/'setup.ps1'),'-Operation',op]
+              if root is not None:args+=['-Root',str(root)]
+              args+=list(extra);return json.loads(run(args,ok).stdout)
+          parsed=base/'parse.ps1';parsed.write_text("param([string]$Folder)\n$ErrorActionPreference='Stop';foreach($p in Get-ChildItem -LiteralPath $Folder -Filter *.ps1){$tok=$null;$err=$null;[void][Management.Automation.Language.Parser]::ParseFile($p.FullName,[ref]$tok,[ref]$err);if($err.Count){throw ($err|Out-String)}}\n",encoding='utf-8-sig')
+          run([ps,'-NoProfile','-File',str(parsed),str(repo/'delivery')])
+          checked=entry('VerifyPackage');assert checked['ok'] and not checked['publisher_authenticity_verified']
+          fresh=base/'unused installation';plan=entry('Plan',fresh);assert plan['operation']=='Plan' and not fresh.exists()
+          assert entry('Upgrade',fresh,ok=False)['code']=='maintenance_confirmation_required'
+          assert entry('New',package,ok=False)['code']=='package_and_installation_must_be_separate'
+          assert entry('ExportSupport',fresh,ok=False)['code']=='explicit_export_confirmation_required'
+          assert entry('ResumeNew',fresh,ok=False)['code']=='new_install_journal_missing'
+          (package/'unexpected.txt').write_text('extra')
+          assert not entry('VerifyPackage',ok=False)['ok'];(package/'unexpected.txt').unlink()
+          installed=entry('New',fresh);cached=pathlib.Path(installed['python']);assert installed['dependencies'] and installed['wheelhouse'].endswith('packages\\wheels')
+          assert cached.exists() and package not in cached.parents and not fresh.exists()
+          again=entry('New',fresh);assert again['python']==str(cached)
+          run([str(cached),'-I','-B','-m','venv',str(fresh/'.venv')]);venv=fresh/'.venv/Scripts/python.exe'
+          assert entry('New',fresh,ok=False)['code']=='new_install_requires_empty_root'
+          upgrade=entry('Upgrade',fresh,'-ConfirmMaintenance')
+          assert pathlib.Path(upgrade['python']).samefile(venv), (upgrade,str(venv))
+          assert not upgrade['dependencies'] and not upgrade['wheelhouse'], upgrade
+          renamed=base/'moved package';package.rename(renamed);package=renamed
+          probe='import sys,json,sqlite3,tkinter;root=tkinter.Tk();root.withdraw();root.update();root.destroy();print(json.dumps(dict(python=sys.version.split()[0],sqlite=sqlite3.sqlite_version,sdk_imported="xtquant" in sys.modules)))'
+          facts=json.loads(run([str(venv),'-I','-B','-c',probe]).stdout);assert facts['python']=='3.11.16' and facts['sdk_imported'] is False
+          cache_script=base/'check-cache.ps1';cache_script.write_text("param([string]$Package,[string]$Parent)\n$ErrorActionPreference='Stop';. (Join-Path $Package 'verify.ps1');$p=Get-QmtPrivateRuntime $Package $Parent;Write-Output $p\n",encoding='utf-8-sig')
+          parent=cached.parent.parent.parent
+          run([ps,'-NoProfile','-File',str(cache_script),str(package),str(parent)])
+          marker=cached.parent.parent/'CACHE_IDENTITY.json';before=marker.read_bytes();marker.write_text('{}')
+          run([ps,'-NoProfile','-File',str(cache_script),str(package),str(parent)],False);assert marker.read_text()=='{}';marker.write_bytes(before)
+          result={'ok':True,'shell':os.environ['TEST_PS'],'scripts':{n:h(repo/'delivery'/n) for n in ('setup.ps1','verify.ps1')},'runtime_archive_sha256':h(runtime),'facts':facts,'checks':['parser','full_tree_verify','plan_no_install','maintenance_consent','export_consent','path_overlap_refusal','missing_resume_journal','unlisted_file_refusal','durable_cache_create_and_reuse','new_existing_root_refusal','upgrade_preserves_interpreter_without_dependency_flags','venv_survives_package_move','cache_unchanged_by_venv_creation','corrupt_cache_refused_not_repaired'],'scope':'exact delivery scripts and real runtime; non-trading payload stub, not full task installer or broker acceptance','account_connected':False,'message_sent':False,'submission_calls':0,'tasks_registered':False}
+          write(repo/'entry-smoke-result.json',result);print(json.dumps(result,ensure_ascii=False))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: round3-entry-${{ matrix.shell }}
+          path: entry-smoke-result.json
+          retention-days: 14
