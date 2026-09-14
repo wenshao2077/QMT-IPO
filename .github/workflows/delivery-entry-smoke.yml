@@ -72,7 +72,9 @@ jobs:
           again=entry('New',fresh);assert again['python']==str(cached)
           run([str(cached),'-I','-B','-m','venv',str(fresh/'.venv')]);venv=fresh/'.venv/Scripts/python.exe'
           assert entry('New',fresh,ok=False)['code']=='new_install_requires_empty_root'
-          upgrade=entry('Upgrade',fresh,'-ConfirmMaintenance');assert pathlib.Path(upgrade['python'])==venv and not upgrade['dependencies'] and not upgrade['wheelhouse']
+          upgrade=entry('Upgrade',fresh,'-ConfirmMaintenance')
+          assert pathlib.Path(upgrade['python']).samefile(venv), (upgrade,str(venv))
+          assert not upgrade['dependencies'] and not upgrade['wheelhouse'], upgrade
           renamed=base/'moved package';package.rename(renamed);package=renamed
           probe='import sys,json,sqlite3,tkinter;root=tkinter.Tk();root.withdraw();root.update();root.destroy();print(json.dumps(dict(python=sys.version.split()[0],sqlite=sqlite3.sqlite_version,sdk_imported="xtquant" in sys.modules)))'
           facts=json.loads(run([str(venv),'-I','-B','-c',probe]).stdout);assert facts['python']=='3.11.16' and facts['sdk_imported'] is False
