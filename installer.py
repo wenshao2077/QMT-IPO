@@ -16,6 +16,7 @@ import uuid
 
 from runtime import atomic_json, read_json, single_instance, validate_config
 from support import Store
+from release_info import VERSION, BASE_COMMIT
 
 MANIFEST = 'DELIVERY_MANIFEST.json'
 
@@ -37,9 +38,10 @@ def destination(name):
         raise ValueError('Unsafe source path')
     if (len(p.parts) == 1 and p.suffix == '.py') or (p.parts[0] == 'calendars' and p.suffix == '.json'):
         return Path('code') / name
-    if len(p.parts) == 1 and p.suffix in ('.ps1', '.vbs', '.md'):
+    if len(p.parts) == 1 and p.suffix in ('.ps1', '.vbs', '.md', '.cmd'):
         return Path(name)
-    if name in ('requirements.txt', 'config.example.json'):
+    if name in ('requirements.txt', 'config.example.json', 'config.schema.json',
+                'DEPLOY_PROTOCOL.json', 'COMPATIBILITY.json', '使用说明.html'):
         return Path(name)
     if p.parts[0] == 'docs' and p.suffix == '.md':
         return Path(name)
@@ -97,7 +99,13 @@ def _replace_file(source, dest):
 def new_install(source, root):
     root = validate_root(root)
     files = payload(source)
-    if root.exists() and any(p.name != '.venv' for p in root.iterdir()):
+    allowed = {'.venv'}
+    if (root/'new-install.json').exists():
+        # Only a verified, checkpointed, still-empty NEW session may add this file.
+        from install_journal import source_may_start
+        source_may_start(source, root)
+        allowed.add('new-install.json')
+    if root.exists() and any(p.name not in allowed for p in root.iterdir()):
         raise ValueError('New installation requires an empty directory (except its own .venv)')
     root.mkdir(parents=True, exist_ok=True)
     for dest, origin in files.items():
@@ -117,7 +125,8 @@ def new_install(source, root):
     store.close()
     atomic_json(root/'config.json', config)
     atomic_json(root/'installed-source.json', {'schema_version': 1,
-                'manifest_sha256': sha(Path(source)/MANIFEST), 'execution_enabled': False})
+                'manifest_sha256': sha(Path(source)/MANIFEST), 'execution_enabled': False,
+                'version': VERSION, 'base_commit': BASE_COMMIT})
     return {'status': 'installed_disabled', 'account_configured': False, 'tasks_registered': False}
 
 
@@ -140,6 +149,12 @@ def upgrade(source, root, quiesced=False):
             stack.enter_context(single_instance(lock))
         before_ledger = sha(ledger)
         backup.mkdir(parents=True, exist_ok=False)
+        identity = root/'installed-source.json'
+        if identity.is_symlink() or (identity.exists() and not identity.is_file()):
+            raise ValueError('Unexpected installed-source identity path')
+        identity_before = sha(identity) if identity.is_file() else None
+        if identity_before is not None:
+            _replace_file(identity, backup/'installed-source.before.json')
         records = {}
         for dest in files:
             path = root/dest
@@ -153,7 +168,8 @@ def upgrade(source, root, quiesced=False):
         report = {'schema_version': 1, 'root': str(root), 'files': records,
                   'config_sha256': hashlib.sha256(config_bytes).hexdigest(),
                   'state_dir': config['state_dir'], 'ledger_sha256_before': before_ledger,
-                  'status': 'prepared', 'new_manifest_sha256': sha(Path(source)/MANIFEST)}
+                  'status': 'prepared', 'new_manifest_sha256': sha(Path(source)/MANIFEST),
+                  'identity_before_sha256': identity_before}
         atomic_json(backup/'rollback.json', report)
         replaced = []
         try:
@@ -162,12 +178,18 @@ def upgrade(source, root, quiesced=False):
                 replaced.append(dest)
             if config_path.read_bytes() != config_bytes or sha(ledger) != before_ledger:
                 raise RuntimeError('Private configuration or ledger changed during source-only upgrade')
+            atomic_json(identity, {'schema_version': 1, 'manifest_sha256': sha(Path(source)/MANIFEST),
+                        'version': VERSION, 'base_commit': BASE_COMMIT})
         except Exception:
             for dest in reversed(replaced):
                 if records[dest.as_posix()] is None:
                     (root/dest).unlink(missing_ok=True)
                 else:
                     _replace_file(backup/'files'/dest, root/dest)
+            if identity_before is None:
+                identity.unlink(missing_ok=True)
+            else:
+                _replace_file(backup/'installed-source.before.json', identity)
             raise
         report['status'] = 'source_replaced_private_state_unchanged'
         atomic_json(backup/'rollback.json', report)
@@ -195,6 +217,9 @@ def rollback(root, rollback_id, quiesced=False):
             raise ValueError('Rollback path outside source whitelist')
         if checksum is not None and sha(folder/'files'/name) != checksum:
             raise ValueError('Rollback source checksum mismatch')
+    if 'identity_before_sha256' in report and report['identity_before_sha256'] is not None:
+        if sha(folder/'installed-source.before.json') != report['identity_before_sha256']:
+            raise ValueError('Rollback installed-source identity checksum mismatch')
     with ExitStack() as stack:
         for lock in (root/'install.lock', Path(config['state_dir'])/'instance.lock', Path(config['control_dir'])/'monitor.lock'):
             stack.enter_context(single_instance(lock))
@@ -204,6 +229,11 @@ def rollback(root, rollback_id, quiesced=False):
                 (root/name).unlink(missing_ok=True)
             else:
                 _replace_file(folder/'files'/name, root/name)
+        if 'identity_before_sha256' in report:
+            if report['identity_before_sha256'] is None:
+                (root/'installed-source.json').unlink(missing_ok=True)
+            else:
+                _replace_file(folder/'installed-source.before.json', root/'installed-source.json')
         if before != (sha(root/'config.json'), sha(ledger)):
             raise RuntimeError('Private state changed while rolling back source')
     return {'status': 'source_rolled_back', 'private_state_restored': False}

@@ -13,6 +13,7 @@ dist/
 config.json
 config.*.json
 !config.example.json
+!config.schema.json
 *.local.json
 qa*.json
 .env
@@ -51,3 +52,6 @@ state/
 maintenance.json
 installed-source.json
 *.lock
+
+# New-install checkpoints stay local
+new-install.json

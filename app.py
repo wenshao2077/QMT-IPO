@@ -20,8 +20,10 @@ from support import Store, china_now, wecom_sender
 from market_calendar import CalendarService, CLOSED, UNKNOWN, ensure_calendar
 from notification_policy import enqueue_calendar_issue, notification_stats, suppress_closed_alerts
 from retention import maintain, archive_size_warning
+from calendar_health import coverage_report
+from notification_policy import combined_notification_stats
 
-VERSION='3.3.0-rc1'
+from release_info import VERSION
 
 
 def inspect_health(config,now=None):
@@ -30,22 +32,21 @@ def inspect_health(config,now=None):
     decision=CalendarService(config).decide(now.date().isoformat())
     info={'day':now.date().isoformat(),'checked_at':now.isoformat(),'active':active,
           'calendar':decision.to_dict(),'issues':[]}
-    if not active:
-        return info|{'status':'not_activated'}
-    # Delivery of real order results and storage supervision remain relevant on
-    # holidays. Availability alerts are gated by the same calendar as submission.
-    try:
-        stats=notification_stats(Path(config['state_dir'])/'state.sqlite3')
-        info.update(pending_notifications=stats['pending'],failed_notifications=stats['failed'],
-                    suppressed_notifications=stats['suppressed'])
-        if stats['pending'] is None:
-            info['issues'].append('ledger_unavailable')
-        elif stats['failed']:
-            info['issues'].append('notification_backlog')
-    except (sqlite3.Error,OSError):
+    info['calendar_coverage']=coverage_report(config, info['day'])
+    # Pause controls future subscriptions, NOT the truth of prior results or queues.
+    stats=combined_notification_stats(config)
+    info.update(pending_notifications=stats['pending'],failed_notifications=stats['failed'],
+                suppressed_notifications=stats['suppressed'],notification_health=stats)
+    if stats['queues']['business']['status']=='unavailable':
         info['issues'].append('ledger_unavailable')
+    if stats['queues']['monitor']['status']=='unavailable':
+        info['issues'].append('monitor_ledger_unavailable')
+    if any((row['failed'] or 0)>0 for row in stats['queues'].values()):
+        info['issues'].append('notification_backlog')
     if archive_size_warning(config):
         info['issues'].append('audit_archive_capacity')
+    if not active:
+        return info|{'status':'attention' if info['issues'] else 'not_activated'}
     if decision.status==CLOSED:
         return info|{'status':'attention' if info['issues'] else 'market_closed'}
     if decision.status==UNKNOWN:
@@ -101,7 +102,7 @@ def watch(config,send=False,now=None):
             labels={'cycle_stuck':'任务长时间未结束','daily_run_missing':'今日定时任务漏跑',
                     'daily_work_incomplete':'今日仍有未完成项目','closeout_failed':'收盘核对未完成',
                     'daily_record_missing':'今日运行记录缺失','notification_backlog':'通知连续失败并积压',
-                    'ledger_unavailable':'去重账本不可读','audit_archive_capacity':'审计归档接近容量阈值，请离线备份并核验'}
+                    'ledger_unavailable':'去重账本不可读','monitor_ledger_unavailable':'监控通知账本不可读','audit_archive_capacity':'审计归档接近容量阈值，请离线备份并核验'}
             text='自动打新异常：'+'；'.join(labels.get(i,i) for i in issues)+'。请查看每日状态；监控未重启、未补单。'
             last=now.timestamp(); alerted=True
         elif not issues and alerted:
@@ -109,8 +110,15 @@ def watch(config,send=False,now=None):
             alerted=False
         atomic_json(statepath,{'issues':issues,'count':count,'alerted':alerted,'last_alert':last,
                                'last_alert_issues':issues if text and issues else before.get('last_alert_issues')})
+    # Publish a truthful local snapshot even when the monitor outbox is corrupt.
+    atomic_json(root/'health.json',snapshot)
     store=Store(root/'monitor.sqlite3')
     try:
+        coverage=snapshot['calendar_coverage']
+        if coverage['issue_code'] and snapshot['calendar']['status'] != UNKNOWN:
+            store.event('calendar-maintenance:'+coverage['issue_key'],
+                        'QMT打新：日历维护提醒\n首次未知日期：'+str(coverage['first_unknown_day'])+
+                        '\n请核对并导入有来源的年度日历；不会猜测新年度，不会自动下载或启用交易。')
         if text:
             store.event(f'monitor:{now.date()}:{last}:{bool(issues)}',f'{now:%Y-%m-%d %H:%M}\n{text}')
         suppress_closed_alerts(store,config)

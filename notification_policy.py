@@ -77,16 +77,61 @@ def enqueue_calendar_issue(config, decision):
 def notification_stats(path):
     """Read old/new ledgers without creating or migrating them."""
     path = Path(path)
-    if not path.is_file():
-        return {'pending': None, 'failed': None, 'suppressed': None}
+    if not path.is_file() or path.is_symlink():
+        return {'pending': None, 'failed': None, 'suppressed': None,
+                'last_confirmed_at': None, 'delivery_time_known': False}
     conn = sqlite3.connect(path.resolve().as_uri()+'?mode=ro', uri=True, timeout=2)
     try:
+        deadline = time.monotonic() + 2
+        conn.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+        conn.execute('BEGIN')
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         excluded = (' AND id NOT IN (SELECT id FROM notification_suppressions)'
                     if 'notification_suppressions' in tables else '')
         pending = conn.execute('SELECT COUNT(*) FROM outbox WHERE delivered=0'+excluded).fetchone()[0]
         failed = conn.execute('SELECT COUNT(*) FROM outbox WHERE delivered=0 AND attempts>0'+excluded).fetchone()[0]
         suppressed = conn.execute('SELECT COUNT(*) FROM notification_suppressions').fetchone()[0] if excluded else 0
-        return {'pending': pending, 'failed': failed, 'suppressed': suppressed}
+        last = None
+        if 'notification_delivery_receipts' in tables:
+            last = conn.execute('SELECT MAX(r.confirmed_at) FROM notification_delivery_receipts r '
+                                'JOIN outbox o ON o.id=r.id WHERE o.delivered=1').fetchone()[0]
+        import math
+        if last is not None and (not isinstance(last, (int, float)) or not math.isfinite(last) or last <= 0):
+            last = None
+        return {'pending': pending, 'failed': failed, 'suppressed': suppressed,
+                'last_confirmed_at': last, 'delivery_time_known': last is not None}
     finally:
         conn.close()
+
+
+def combined_notification_stats(config):
+    """Unknown is never zero. An absent, never-created monitor DB is 'not_created'.
+
+    Once a monitor database exists but cannot be read, the aggregate is unknown;
+    keep the independently known business counts for local diagnosis.
+    """
+    result = {}
+    control = Path(config['control_dir'])
+    monitor_was_observed = any((control/name).exists() for name in
+                               ('monitor-state.json','health.json','latest-monitor-preview.json','latest-monitor-live.json'))
+    for name, path in [('business', Path(config['state_dir'])/'state.sqlite3'),
+                       ('monitor', Path(config['control_dir'])/'monitor.sqlite3')]:
+        try:
+            if name == 'monitor' and not path.exists() and not path.is_symlink() and not monitor_was_observed:
+                result[name] = {'pending': 0, 'failed': 0, 'suppressed': 0,
+                                'last_confirmed_at': None, 'delivery_time_known': False,
+                                'status': 'not_created'}
+            else:
+                stats = notification_stats(path)
+                result[name] = dict(stats, status='readable' if stats['pending'] is not None else 'unavailable')
+        except (sqlite3.Error, OSError, ValueError, TypeError):
+            result[name] = {'pending': None, 'failed': None, 'suppressed': None,
+                            'last_confirmed_at': None, 'delivery_time_known': False,
+                            'status': 'unavailable'}
+    readable = all(row['status'] != 'unavailable' for row in result.values())
+    totals = {key: sum(row[key] for row in result.values()) if readable else None
+              for key in ('pending', 'failed', 'suppressed')}
+    stamps = [row['last_confirmed_at'] for row in result.values() if row['last_confirmed_at'] is not None]
+    return dict(totals, readable=readable, queues=result,
+                last_confirmed_at=max(stamps) if stamps else None,
+                delivery_time_known=bool(stamps))

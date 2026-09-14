@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QMT 首次使用说明</title><style>body{max-width:900px;margin:45px auto;padding:0 24px;font:17px/1.8 system-ui,sans-serif;color:#202936}h1{font-size:29px}h2{font-size:21px;margin-top:28px}.alert{border-left:4px solid #996719;padding:12px 18px;background:#faf4e8}strong{font-weight:650}</style><h1>QMT 自动打新助手 · 3.4.0-alpha2</h1>
+<p class="alert">第一阶段已由用户确认验收；本包是第二阶段增量完整源码候选，新增功能仍需隔离 Windows 验证。不是已完成实盘验收、签名或完全离线安装的正式产品。</p>
+<h2>开始之前</h2><p>需要已经安装的 Python 3.11 x64（含 Tkinter）、Windows 和用户获准使用的 miniQMT。此包不含 Python 安装程序、SDK 二进制或券商客户端。源码解压目录和安装目录必须分开。</p>
+<h2>人工操作</h2><p>核对来源及哈希后，在隔离环境双击 <strong>开始安装.cmd</strong>。选择 New install，填写新的安装目录。只有明确输入 YES 才允许下载固定依赖。完成后选择 Configure locally，在本地向导填写账户和 Webhook，再运行 Local checks。</p>
+<p>安装、首次配置与本地检查都不会连接账户、发送通知或启用交易。窗口关闭不证明配置已保存；请核对 Doctor 结果。</p>
+<h2>安装中断</h2><p>保留原包和目录，选择 Resume interrupted NEW install。只接续同一来源、从未使用的新安装。账本丢失、数据损坏或有授权/业务历史时必须停止人工核验，不能删库或删标记重试。</p>
+<h2>AI 操作</h2><p>本机代理先读 AGENTS.md、AI_DEPLOY.md、DEPLOY_PROTOCOL.json，调用同一个 setup.ps1。账号和密钥不进入聊天或命令行。默认结束于已安装/已配置，尚未启用；账户检查、真实通知和交易启用需要分别授权。</p>
+<h2>维护与诊断</h2><p>控制台新增“维护与诊断”页：查看日历覆盖缺口、最近已知通知送达时间和健康问题；导出本地脱敏摘要ZIP，或生成只读恢复建议。不会自动修复、上传日志或改动交易授权。暂停申购不隐藏历史通知失败，未知状态不当作零。</p><h2>重要限制</h2><p>券商已报/已成不等于中签；不卖出、不缴款、不划转、不重启 QMT、不做北交所。关闭控制台不等于暂停，暂停不撤销已开始的一轮。内置日历仅覆盖 2026 年，未知日期不放行。</p>
+<h2>详细材料</h2><p>完整操作见 README.md；本轮实现见 docs/ROUND2.md；实际测试见 docs/ROUND2_TEST_RESULTS.md；待执行的 Windows 验收见 docs/WINDOWS_ROUND2_ACCEPTANCE.md。历史验收不是本轮证据。</p></html>

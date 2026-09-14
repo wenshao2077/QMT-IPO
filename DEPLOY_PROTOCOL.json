@@ -1,0 +1,119 @@
+{
+  "schema_version": 1,
+  "entry": "setup.ps1",
+  "version": "3.4.0-alpha2",
+  "operations": {
+    "VerifyPackage": {
+      "mutates": false,
+      "needs_root": false,
+      "account_connection": false
+    },
+    "Plan": {
+      "mutates": false,
+      "needs_root": true,
+      "account_connection": false
+    },
+    "Doctor": {
+      "mutates": false,
+      "needs_root": false,
+      "account_connection": false
+    },
+    "New": {
+      "mutates": true,
+      "needs_root": true,
+      "requires_empty_root": true,
+      "default_execution": false,
+      "network": "only_with_InstallDependencies"
+    },
+    "ResumeNew": {
+      "mutates": true,
+      "needs_root": true,
+      "requires_matching_new_install_receipt": true,
+      "default_execution": false,
+      "network": "only_with_InstallDependencies"
+    },
+    "Configure": {
+      "mutates": true,
+      "needs_root": true,
+      "local_interactive_only": true,
+      "first_use_only": true,
+      "sensitive_cli_arguments": false,
+      "default_execution": false
+    },
+    "Upgrade": {
+      "mutates": true,
+      "needs_root": true,
+      "preserves_existing_configuration_ledger_and_switches": true,
+      "explicit_maintenance_authorization_required": true
+    },
+    "Rollback": {
+      "mutates": true,
+      "needs_root": true,
+      "requires": [
+        "RollbackId"
+      ],
+      "source_only": true,
+      "explicit_maintenance_authorization_required": true
+    },
+    "Health": {
+      "mutates": false,
+      "needs_root": true,
+      "account_connection": false,
+      "network": false
+    },
+    "RecoveryPlan": {
+      "mutates": false,
+      "needs_root": true,
+      "account_connection": false,
+      "network": false,
+      "automatic_repair": false
+    },
+    "CalendarCoverage": {
+      "mutates": false,
+      "needs_root": true,
+      "account_connection": false,
+      "network": false
+    },
+    "ExportSupport": {
+      "mutates": "only_creates_explicit_output_zip",
+      "needs_root": true,
+      "requires": [
+        "Output",
+        "ConfirmExport"
+      ],
+      "account_connection": false,
+      "network": false,
+      "uploads": false,
+      "raw_private_files_included": false
+    },
+    "VerifyArchive": {
+      "mutates": false,
+      "needs_root": false,
+      "requires": [
+        "Archive"
+      ],
+      "optional": [
+        "ExpectedSha256"
+      ],
+      "executes_archive_code": false,
+      "publisher_authenticity_verified": false
+    }
+  },
+  "forbidden_automatic_actions": [
+    "enable_execution",
+    "run_live",
+    "probe_account",
+    "send_test_notification",
+    "restart_QMT",
+    "reinitialize_ledger",
+    "upload_private_files"
+  ],
+  "exit_codes": {
+    "0": "operation completed; not account/trading acceptance",
+    "2": "check blocked or entry failure",
+    "other_nonzero": "native operation failed; preserve checkpoint"
+  },
+  "configuration_secret_input": "local_GUI_only; never CLI flags or chat",
+  "final_default_state": "installed_and_configured_but_not_activated",
+  "compatibility_note": "metadata match is not SDK/client/account acceptance"
+}

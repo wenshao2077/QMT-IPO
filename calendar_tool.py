@@ -33,7 +33,7 @@ def import_annual(config, source, reviewed=False):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description='交易日历状态、数据端更新和年度公告包导入；不连接交易账户')
-    p.add_argument('action', choices=['status', 'refresh', 'import'])
+    p.add_argument('action', choices=['status', 'coverage', 'refresh', 'import'])
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument('--config', type=Path)
     group.add_argument('--state-dir', type=Path)
@@ -50,6 +50,9 @@ def main(argv=None):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             if args.action == 'status':
                 result = CalendarService(config).decide(args.day).to_dict()
+            elif args.action == 'coverage':
+                from calendar_health import coverage_report
+                result = coverage_report(config, args.day)
             elif args.action == 'import':
                 if not args.annual_file:
                     raise ValueError('--annual-file is required')
@@ -57,7 +60,7 @@ def main(argv=None):
             else:
                 result = refresh_qmt(config, args.day, allow_download=args.allow_download)
         print(json.dumps(result, ensure_ascii=False))
-        return 2 if result.get('status') == 'unknown' else 0
+        return 2 if result.get('status') in ('unknown', 'blocked') else 0
     except Exception as exc:
         # Do not emit SDK URLs, local account identifiers or arbitrary exceptions.
         print(json.dumps({'status': 'calendar_update_failed', 'error_type': type(exc).__name__,

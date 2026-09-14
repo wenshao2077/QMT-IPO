@@ -1,6 +1,6 @@
 # Run from a reviewed SOURCE package, not from a partially replaced live directory.
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('New','Upgrade','Rollback')][string]$Mode,
+    [Parameter(Mandatory=$true)][ValidateSet('New','ResumeNew','Upgrade','Rollback')][string]$Mode,
     [Parameter(Mandatory=$true)][string]$Root,
     [string]$SourceRoot,
     [string]$PythonExe='py',
@@ -18,33 +18,102 @@ if($Root.Contains('"')){throw 'Unsupported root quoting characters'}
 . (Join-Path $SourceRoot 'task_identity.ps1')
 $specs=@{ 'QmtIPO3-Cycle'='cycle'; 'QmtIPO3-Notify'='notify'; 'QmtIPO3-Monitor'='monitor'; 'QmtIPO3-Backup'='backup' }
 $python=Join-Path $Root '.venv/Scripts/python.exe'
-if($Mode -eq 'New'){
-    if(Test-Path -LiteralPath $Root){if(@(Get-ChildItem -LiteralPath $Root -Force).Count){throw 'New mode requires an empty root; do not overwrite an existing installation'}}
-    foreach($name in $specs.Keys){if(Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue){throw 'Task name already exists; use reviewed upgrade, not a second installation'}}
-    $pyArgs=@();if($PythonExe -eq 'py'){$pyArgs=@('-3.11')}
-    & $PythonExe @pyArgs -c "import sys; assert sys.version_info[:2]==(3,11), 'Python 3.11 required'"
-    if($LASTEXITCODE -ne 0){throw 'Python 3.11 validation failed'}
-    & $PythonExe @pyArgs -m venv $Root/.venv
-    if($LASTEXITCODE -ne 0){throw 'Virtual environment creation failed'}
-    & $python -B (Join-Path $SourceRoot 'installer.py') new --source $SourceRoot --root $Root
-    if($LASTEXITCODE -ne 0){throw 'Source installation failed; no tasks enabled'}
-    # Protect the entire private installation before adding any real identifiers.
-    $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-    & icacls.exe $Root /inheritance:r /grant:r "*${sid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
-    if($LASTEXITCODE -ne 0){throw 'Private directory ACL setup failed'}
-    if($InstallDependencies){
-        & $python -m pip install --disable-pip-version-check -r (Join-Path $SourceRoot 'requirements.txt')
-        if($LASTEXITCODE -ne 0){throw 'Dependency installation failed; tasks remain absent/disabled'}
+if($Mode -in @('New','ResumeNew')){
+    # Serialize two human/AI installers for the same destination. No worker is killed.
+    $hash=[Security.Cryptography.SHA256]::Create()
+    try{$key=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($Root.TrimEnd('\').ToUpperInvariant())))).Replace('-','')}
+    finally{$hash.Dispose()}
+    $newMutex=[Threading.Mutex]::new($false,('Local\QmtIpoNew-'+$key))
+    $newLocked=$false
+    try{
+        try{$newLocked=$newMutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$newLocked=$true}
+        if(-not $newLocked){throw 'Another installer is running for this destination'}
+        $pyArgs=@();if($PythonExe -eq 'py'){$pyArgs=@('-3.11')}
+        & $PythonExe @pyArgs -c "import sys,struct; assert sys.version_info[:2]==(3,11) and struct.calcsize('P')==8, 'Python 3.11 x64 required'"
+        if($LASTEXITCODE -ne 0){throw 'Python 3.11 x64 validation failed'}
+        function Invoke-NewJournal([string]$Action,[string]$Stage){
+            $a=@('-B',(Join-Path $SourceRoot 'install_journal.py'),$Action,'--source',$SourceRoot,'--root',$Root)
+            if($Stage){$a+=@('--stage',$Stage)}
+            $text=& $PythonExe @pyArgs @a
+            $nativeExit=$LASTEXITCODE
+            $result=$text|ConvertFrom-Json
+            if($nativeExit -ne 0 -or -not $result.ok){throw ('New-install checkpoint refused: '+$result.code)}
+            return $result
+        }
+        if($Mode -eq 'New'){
+            if(Test-Path -LiteralPath $Root){if(@(Get-ChildItem -LiteralPath $Root -Force).Count){throw 'New mode requires an empty root; use ResumeNew only for its own interrupted installation'}}
+            foreach($name in $specs.Keys){if(Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue){throw 'Task name already exists; use reviewed upgrade, not a second installation'}}
+            $state=Invoke-NewJournal 'start' ''
+        }else{
+            $state=Invoke-NewJournal 'status' ''
+            if($state.complete){
+                @{schema_version=1;ok=$true;code='already_installed';next_action='Doctor';changes_applied=$false}|ConvertTo-Json -Compress
+                exit 0
+            }
+        }
+        # Protect new-install files before creating private configuration or a key file.
+        $sid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        & icacls.exe $Root /inheritance:r /grant:r "*${sid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' | Out-Null
+        if($LASTEXITCODE -ne 0){throw 'Private directory ACL setup failed'}
+        if($state.stage -eq 'prepared'){
+            # Re-running venv here is permitted only before source initialization.
+            $extra=@(Get-ChildItem -LiteralPath $Root -Force|Where-Object {$_.Name -notin @('.venv','new-install.json')})
+            if($extra.Count){throw 'Unexpected files before source initialization; manual review required'}
+            & $PythonExe @pyArgs -m venv (Join-Path $Root '.venv')
+            if($LASTEXITCODE -ne 0){throw 'Virtual environment creation failed; ResumeNew may retry this checkpoint'}
+            $state=Invoke-NewJournal 'advance' 'environment_ready'
+        }
+        if(-not (Test-Path -LiteralPath $python)){throw 'Private environment missing; manual review required'}
+        if($state.stage -eq 'environment_ready'){$state=Invoke-NewJournal 'advance' 'source_started'}
+        if($state.stage -eq 'source_started'){
+            $extra=@(Get-ChildItem -LiteralPath $Root -Force|Where-Object {$_.Name -notin @('.venv','new-install.json')})
+            if(-not $extra.Count){
+                & $python -B (Join-Path $SourceRoot 'installer.py') new --source $SourceRoot --root $Root
+                if($LASTEXITCODE -ne 0){throw 'Source initialization interrupted; preserve all files for recovery review'}
+            }
+            # Handles a crash after a complete initialization but before its checkpoint.
+            # Partial/missing/damaged ledgers are NEVER initialized again here.
+            Invoke-NewJournal 'verify-fresh' '' | Out-Null
+            $state=Invoke-NewJournal 'advance' 'source_ready'
+        }
+        Invoke-NewJournal 'verify-fresh' '' | Out-Null
+        if($state.stage -eq 'source_ready'){
+            if($InstallDependencies){
+                & $python -m pip install --disable-pip-version-check -r (Join-Path $SourceRoot 'requirements.txt')
+                if($LASTEXITCODE -ne 0){throw 'Dependency installation failed; ResumeNew can retry, no tasks enabled'}
+            }
+            & $python -B (Join-Path $SourceRoot 'environment_check.py')
+            if($LASTEXITCODE -ne 0){throw 'Dependencies/runtime not ready; review environment report and explicitly ResumeNew -InstallDependencies when appropriate'}
+            $state=Invoke-NewJournal 'advance' 'dependencies_ready'
+        }else{
+            & $python -B (Join-Path $SourceRoot 'environment_check.py')
+            if($LASTEXITCODE -ne 0){throw 'Runtime changed after checkpoint; review before resuming'}
+        }
+        . (Join-Path $SourceRoot 'tasks.ps1')
+        $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
+        foreach($def in @(New-IpoTaskDefinitions -Root $Root -User $user)){
+            $existing=@(Get-ScheduledTask -TaskName $def.Name -ErrorAction SilentlyContinue)
+            if($existing.Count -gt 1){throw 'Ambiguous task ownership; no task overwritten'}
+            if($existing.Count){
+                Assert-IpoOwnedTask $existing[0] $Root $specs[$def.Name]
+                if($existing[0].Settings.Enabled -or $existing[0].State -eq 'Running'){throw 'Existing task is enabled/running; not an unused new installation'}
+            }else{
+                Register-ScheduledTask -TaskName $def.Name -InputObject $def.Task | Out-Null
+            }
+            $check=Get-ScheduledTask -TaskName $def.Name
+            Assert-IpoOwnedTask $check $Root $specs[$def.Name]
+            if($check.Settings.Enabled -or $check.State -eq 'Running'){throw 'New task unexpectedly enabled/running'}
+        }
+        if($state.stage -eq 'dependencies_ready'){$state=Invoke-NewJournal 'advance' 'tasks_ready'}
+        & (Join-Path $SourceRoot 'install_panel.ps1') -Root $Root
+        Invoke-NewJournal 'verify-fresh' '' | Out-Null
+        $state=Invoke-NewJournal 'advance' 'complete'
+        @{schema_version=1;ok=$true;code='installed_disabled';execution_enabled=$false;account_connected=$false;message_sent=$false;submission_calls=0;next_action='Configure'}|ConvertTo-Json -Compress
+        exit 0
+    }finally{
+        if($newLocked){$newMutex.ReleaseMutex()}
+        $newMutex.Dispose()
     }
-    . (Join-Path $SourceRoot 'tasks.ps1')
-    $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
-    foreach($def in @(New-IpoTaskDefinitions -Root $Root -User $user)){
-        Register-ScheduledTask -TaskName $def.Name -InputObject $def.Task | Out-Null
-        if((Get-ScheduledTask -TaskName $def.Name).Settings.Enabled){throw 'New task unexpectedly enabled'}
-    }
-    & (Join-Path $SourceRoot 'install_panel.ps1') -Root $Root
-    Write-Output 'NEW_INSTALL_DISABLED: configure private files and verify locally before user authorization.'
-    exit 0
 }
 if($InstallDependencies){throw 'Upgrade/rollback does not change the existing SDK environment'}
 if(-not (Test-Path -LiteralPath $python)){throw 'Existing isolated environment missing'}
@@ -76,7 +145,7 @@ try{
     foreach($name in $specs.Keys){if((Get-ScheduledTask -TaskName $name).State -eq 'Running'){throw 'Worker is running; let it finish before retrying'}}
     $ownedProcesses=@(Get-CimInstance Win32_Process | Where-Object {
         $_.Name -in @('python.exe','pythonw.exe') -and $_.CommandLine -and $_.CommandLine.Contains($Root) -and
-        ($_.CommandLine -match '(panel|app|launcher|probe_readonly)\.py')
+        ($_.CommandLine -match '(panel|app|launcher|probe_readonly|configure)\.py')
     })
     if($ownedProcesses.Count){throw 'Close the console and wait for owned workers; no process has been killed'}
     $sourceStarted=$true

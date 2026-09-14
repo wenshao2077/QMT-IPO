@@ -1,153 +1,96 @@
-# QMT打新 3.3.0-rc1
+# QMT 自动打新助手 3.4.0-alpha2
 
-> 2026-09-12 本机接续：已修正 Windows 路径测试与 PowerShell 5.1 安装入口，完成 Windows 新安装和既有 worker 升级。当前证据与限制见[Windows安装与升级验收](docs/Windows安装与升级验收.md)。下文网页交付状态及未验证事项为该阶段记录，以本机接续记录为后续补充；真实券商受理仍未在本轮验收。
+**第二阶段完整源码候选包。第一阶段alpha1已由用户确认验收；本alpha2增量尚未在本轮执行Windows实机验收。**
 
-Windows 上的 miniQMT 新股、新债申购工具。此版基于 `922f7b1`（3.2），面向稳定运行与最小通用交付。**这是待本机 TARS 核验的候选版，不是已经完成实盘验收的正式版本。** 没有云端交易服务，也不依赖 QuantClass。
+基线是已验收的alpha1完整ZIP，不是GitHub旧main或仅版本标识的分支。基线包SHA-256、改动和限制见 `docs/ROUND2.md`；实际测试见 `docs/ROUND2_TEST_RESULTS.md`；Windows增量清单见 `docs/WINDOWS_ROUND2_ACCEPTANCE.md`。历史验收范围不自动扩写为当前版本的实盘认证。
 
-## 边界与前提
+人工先打开 `使用说明.html`；AI 先读 `AGENTS.md` 和 `AI_DEPLOY.md`。本包是完整源码候选包，不是补丁，不需要逐文件覆盖现有安装。
 
-打开普通 QMT 窗口并不足够。需要 Windows、Python **3.11 x64**、券商允许使用的 **miniQMT 模式**、已登录账户、有效交易接口权限，以及与该客户端兼容的 `xtquant` SDK。沿用仓库依赖组合：`xtquant==250807.1.2`、`numpy==1.26.4`、`pandas==2.2.3`；这是既有版本组合，不承诺兼容所有券商。Tkinter 随标准 Python 安装。Windows 任务使用交互式已登录用户，不保存 Windows 密码；注销后不能保证运行。
+## 第二阶段新增
 
-支持范围和交易语义未扩大：默认 SH/SZ，新股科创板仍仅在原配置允许 KCB 时处理；BJ 不在本程序范围。股票仍按市场额度、发行上限和发行最小单位计算；债券仍不使用股票市值额度且最多 10000 张；价格沿用发行价。配置允许某市场**不证明券商给了该市场权限**。
+控制台“维护与诊断”汇总日历缺口、通知送达时间和健康问题。暂停申购不再隐藏账本/通知问题；通知读取失败显示未知，不冒充零条。未来120天本地日历检查提供90/30/7天分级预警，未知或冲突仍然禁止提交。
 
-提交窗口仍是北京时间 09:35–11:30（不含 11:30）、13:00–14:50（含 14:50）；午间可以查询但不提交。请求意图先持久化，已有/不确定委托只核对，不盲目补报。没有卖出、缴款、资金划转、QMT 重启或自动恢复授权功能。券商已报/已成不等于中签。
+统一入口新增 Health、RecoveryPlan、ExportSupport、CalendarCoverage、VerifyArchive。脱敏包只保存到本机，不含原始日志/数据库，不自动上传；恢复建议只读，不执行修复。操作和准确返回值含义见 `docs/MAINTENANCE.md`。
 
-## 这次改动
+发布包附SOURCE_IDENTITY和直接组件清单，校验所有文件与压缩包结构；未获得发布签名或完整离线依赖许可。SQLite运行时版本告警与只读WAL辅助文件边界见 `docs/RUNTIME_ADVISORIES.md`。
 
-申购、监控、界面共同使用 `market_calendar.py`，返回交易日 / 非交易日 / 未知，以及来源、覆盖起止、原因和校验警告。判断在交易账户连接前执行；已确认休市零连接、零查询、零提交，写入“非交易日，已跳过”回执。周末不采用国务院调休工作日规则。
+## 当前实现
 
-未知日历禁止提交，但允许独立的 **xtdata 数据端**限时刷新，不调用交易账户连接。周期程序最多每半小时尝试一次刷新，20 秒超时；失败产生按稳定事件身份去重的日历异常，**刷新时间变化不会重新刷屏**。交易日真实连接/查询故障、未完成申购和通知失败继续监督。
+本地环境检查覆盖 Windows、Python 3.11 x64、固定依赖的安装元数据、Tk 模块、配置、账本、日历及任务状态。不会导入交易 SDK；元数据正确不证明客户端二进制兼容、账户权限或券商受理。
 
-旧的休市纯连接错误在其事件日期被确认休市、且当日不存在任何委托意图时，登记为“抑制”，**不删除原通知，不伪装已发送**。委托结果、混合内容、多页内容、日期未知、账本不可读或存在当日意图的消息均保留。历史错误、原尝试次数和回执不改成成功。
+首次配置使用本地图形向导，账户和 Webhook 留在本机。只处理无授权、无实盘运行记录、空委托/通知账本且四个任务均禁用的新实例。已运行实例需要独立维护流程，不能使用首次配置向导更换账户或重建账本。
 
-另修复一个相关的去重风险：不仅 live，预览、通知补发和备份入口也不能在原账本丢失时创建空账本。只有明确的新安装流程初始化新账本。
+新安装有持久化阶段回执。依赖安装、禁用任务注册、快捷方式等步骤失败后，可以在严格身份核验下接续。部分源码/账本初始化失败、账本缺失或损坏、已有业务活动、私有配置被改动等情况停止并保留证据，**不承诺所有中断自动修复**。
 
-## 日历来源与覆盖
+“完成”指截至本轮；10:00、11:00、13:00、14:00、14:40 做有限再查询，15:05 收盘核对。错过时点由既有五分钟计划的下一次实际唤醒执行；没有新建额外交易计划。晚到项目、早期零额度可以重新检查，只有从未产生意图的项目才可能提交。已有意图、已报或不确定结果都不重发。
 
-内置 `calendars/2026.json` 根据沪深交易所 2025-12-22 年度公告整理，明确覆盖 **2026-01-01 至 2026-12-31**。七类节日范围和周末共同计算休市，来源链接、公告号、核对日期、校验和均在文件中。它**不覆盖 2027**；临时休市/更正公告需维护者更新，校验和只是完整性检查而非官方数字签名。
+## 安装前提
 
-本地 `state_dir/calendar.json` 继续复用。旧格式没有可靠来源/覆盖起点，只有与经核对年度公告的**整个声明区间**完全吻合才采信。新版历史缓存只覆盖 SH/SZ 实際返回日期交集的首日至末日，不把请求的年末当作返回覆盖期。没有日期且位于有效完整区间之外，返回未知。冲突不放行。
+目标是 Windows x64、**已安装的 Python 3.11 x64（含 Tkinter）**、券商允许的 miniQMT 模式、用户自己的客户端和 SDK 权限。本源码包不含 Python 安装程序、SDK wheel、完整离线依赖、券商客户端或签名材料。首次下载依赖需显式允许网络访问；不能把此候选包称为“解压即可运行”或“完全离线安装”。
 
-官方 QMT 文档：`get_trading_dates` 返回时间戳列表；`get_trading_calendar` 支持未来日期，但要求节假日数据已经下载。`get_holidays()` 中出现某年度日期不能证明全年完整。日历数据端仍可能依赖 miniQMT/行情服务及网络；本程序没有把它包装成无联网依赖。`--allow-download` 才明确调用节假日下载，并与经核对年度公告的全年列表逐日比对；这个比对也不擅自扩大历史缓存覆盖。
+依赖沿用 `xtquant==250807.1.2`、`numpy==1.26.4`、`pandas==2.2.3`，以 `requirements.txt` 为准。没有经过验证的通用券商矩阵；`COMPATIBILITY.json` 中真实券商验收名单暂为空。
 
-详见 [日历维护与依据](docs/CALENDAR.md)。QuantClass period_offset/offset 没有接入；本环境不能读取其客户端/数据库，结构、覆盖和日期语义**未验证**，不能把 offset 当交易日历。
+仅单机单账户；SH/SZ 和显式允许的科创板新股；不含 BJ。股票数量仍按市值额度、发行上限及发行单位计算；债券不使用股票额度，仍按原上限处理。未扩大市场、价格、数量规则或提交时段。配置允许某市场不等于券商授予权限。
 
-## 交付结构
+Windows 计划使用已登录的交互式用户；不保存系统密码。不自动启动/重启 QMT，不保证注销、断电或睡眠时执行；睡眠唤醒等目标 Windows 行为仍需验收。
 
-源码包中的 `DELIVERY_MANIFEST.json` 给出安装白名单和每个文件的 SHA-256；不包含账号配置、Webhook、账本、日志、虚拟环境、生产回执或客户端。清单不是签名，先核对可信提交和审查来源，再核对清单。
+## 人工安装（隔离验收环境）
 
-安装后的目录：
+先核对来源、压缩包 SHA-256 和解压后的 `DELIVERY_MANIFEST.json`。清单不是发行者签名。源码解压目录与安装目录必须分开，不能放到彼此内部，不能直接在压缩软件中运行。
+
+双击 `开始安装.cmd`，选择 New install，输入新的安装目录。只有明确输入 YES 才允许下载依赖。完成后选择 Configure locally 打开本机向导，再选择 Local checks。向导不启动 miniQMT、不连接账户、不发送通知、不启用交易。
+
+也可从解压后的源码目录明确执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Operation VerifyPackage
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Operation Plan -Root 'D:\QMT IPO Test'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Operation New -Root 'D:\QMT IPO Test' -InstallDependencies
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Operation Configure -Root 'D:\QMT IPO Test'
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Operation Doctor -Root 'D:\QMT IPO Test'
+```
+
+这些是安装/本地检查命令，**不是生产部署授权**。没有 Python 3.11 时先安装获准来源的运行时；不要由 AI 下载未知安装器、关闭杀毒软件或全局更改 PowerShell 执行策略。
+
+## 安装中断
+
+保留原源码包和目标目录。运行 Plan 判断；只有与本次源码清单匹配、从未投入使用的新安装才可接续：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1 -Operation ResumeNew -Root 'D:\QMT IPO Test' -InstallDependencies
+```
+
+ResumeNew 不等于重新安装。缺失账本、账本已写入意图、存在授权、数据路径改变或初始化状态不明时停止。不要删 `state.sqlite3`、`new-install.json`、维护标记或配置写入标记来让检查通过。
+
+配置写入若被硬中断，会保留 `runtime/configuration-pending.json`，检查与执行拒绝继续。该场景当前提供安全阻断、记录和只读恢复建议，需本机人工核验后按审查流程恢复，不是自动恢复入口。
+
+## 三种不同的“通过”
+
+| 层次 | 意义 |
+|---|---|
+| 包/本地检查通过 | 只说明当前检查项满足；不证明账户权限 |
+| 单独授权的账户只读检查通过 | 只说明读取接口可用；不证明申购已受理 |
+| 正常授权流程下的券商回报核对 | 才是对应业务场景的实盘验收证据 |
+
+安装流程的默认终点为“已安装/已配置，尚未启用”。旧控制台的账户检查、测试通知、启用按钮仍按各自的用户确认边界运行，**本轮网页开发不执行这些操作**。
+
+关闭控制台不等于暂停；暂停停止后续申购计划，不撤单，也不保证立即停止已开始的一轮。券商已报/已成不等于中签。本工具不做卖出、缴款或资金划转；中签及缴款请在券商渠道核实。
+
+## 升级与回滚
+
+本候选代码应先完成隔离 Windows 验收，不应直接升级现有生产 worker。确需获准维护时，使用原根目录和独立的、已审查新源码包，关闭控制台/配置向导并等待 worker 自然结束；不要逐文件热拷贝。
+
+`setup.ps1 -Operation Upgrade -Root <原根目录>` 调用原受控升级机制。升级不改依赖、不换账户、不移动账本，保留原开关，不主动触发任务。源码身份回执随代码更新。
+
+`setup.ps1 -Operation Rollback -Root <原根目录> -RollbackId <已核验ID>` 只恢复代码及其版本身份，绝不恢复过期数据库、抹除后来产生的意图或回报。回到旧版会恢复其已知行为限制，不能把回滚当业务状态重置。
+
+## 开发与离线验证
 
 ```text
-<Root>/
-  .venv/                   本程序独立 Python 环境
-  code/                    Python 源码及 calendars/
-  config.json              私有配置，升级逐字节保留
-  secure/webhook.txt        私有密钥文件，新安装为空
-  state/state.sqlite3      仅新安装使用此默认路径
-  runtime/                 回执、监控、备份、维护记录
-  *.ps1 / hidden.vbs       任务与桌面入口
+python -B -c "from installer import payload; payload('.')"
+xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2
 ```
 
-**升级不把旧路径迁到上述默认路径。** 例如现有 `state_dir` 指向旧目录，仍必须保留原路径，不能用配置示例替换它。源码包与安装目录必须分开。只支持一套固定名称的任务；第二套安装遇到任务名冲突会拒绝，而不是覆盖另一套。
+Windows 下省略 `xvfb-run -a`，并运行 `test_tasks.ps1` 的禁用任务定义/脚本解析测试；它不注册、不启用任务。真实 Windows 安装/UAC/快捷方式/恢复仍是独立验收。
 
-## 首次安装（不启用交易）
-
-在目标 Windows 上，下载并核对本次审查源码，关闭未知脚本。以下路径都是示例，支持中文和空格：
-
-```powershell
-Set-Location 'D:\Source Packages\QMT IPO'
-py -3.11 -c "from installer import payload; payload('.')"
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 `
-  -Mode New -Root 'D:\QMT 打新' -InstallDependencies
-```
-
-`New` 要求空目录，建立独立环境；只有 `-InstallDependencies` 才安装依赖（需要软件包网络访问，不连接账户）。生成 `enable_execution=false`、独立新账本和空 Webhook 文件，注册四个**禁用**任务，创建无窗口控制台快捷方式。不打开 QMT、不查询账户、不启用申购。目录 ACL 限定当前用户和 SYSTEM；失败则停止，不以“安装成功”掩盖配置缺失。
-
-编辑 `<Root>/config.json`：填写账号、真实 miniQMT 的 `userdata_mini` 路径；确认私有状态路径独立于 QMT 目录；保持 `allowed_markets` 为本人批准的范围。将 Webhook 完整 URL 只放到 `webhook_file` 指定的私有文件，**不要写入源码或配置示例**。新安装应保持执行开关 false，直到本机检查完成并由用户授权。
-
-## 配置检查、只读检查和用户启用
-
-```powershell
-$Root='D:\QMT 打新'
-$Python=Join-Path $Root '.venv\Scripts\python.exe'
-& $Python -B "$Root\code\diagnostics.py" check --config "$Root\config.json"
-& $Python -B "$Root\code\calendar_tool.py" status --config "$Root\config.json"
-```
-
-以上不连接账户、不发送测试消息，不导入交易 SDK。诊断不输出账号或 Webhook。界面“校验配置（不发送）”等价。
-
-用户在本机启动并登录 miniQMT 后，可**明确执行只读连接检查**：
-
-```powershell
-& $Python -B "$Root\code\probe_readonly.py" --config "$Root\config.json"
-```
-
-这会连接账户并查询状态/委托/数据，但不生成意图、不提交、不发送消息。仅在本机授权后运行，网页端没有执行它。读接口可用不等于所有下单权限已经验收。
-
-打开桌面 **QMT IPO Console**。界面显示真实配置与任务开关、QMT 路径、日历、最近运行、今日结果、通知待发/失败/抑制状态。打开界面和安装依赖不会启用交易。只有用户点击“授权并启用每日打新”，阅读范围并确认后，才启用现有任务；配置检查不通过则拒绝。启用不重建任务，不触碰其他/旧版程序的任务。
-
-“测试通知”是**真实发送**，必须用户再次明确确认；仅检查 Webhook 语法不发送消息。“暂停每日打新”关闭后续申购任务并设开关 false，不撤单、不杀死已开始的一轮，通知和备份可继续。关闭窗口不等于暂停。
-
-## 从 3.2 升级（由本机 TARS 操作）
-
-不要运行 New；不要手工只复制几个 Python 文件；不要覆盖 config.json、secure、state、daily 或去重账本。
-
-1. 记录当前版本、源码哈希、配置文件哈希、`state_dir` 与实际账本身份、四个任务的定义/启用状态；做一致性账本备份和受保护的配置备份。备份留本机，不放 Git。关闭控制台，并确认当前申购/核对任务没有运行。优先非交易窗口操作。
-2. 在**新源码包目录**运行下面命令，`Root` 必须是现有 3.2 安装根目录：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 `
-  -Mode Upgrade -Root 'D:\Existing QMT IPO'
-```
-
-3. 包装器精确核验四个任务的可执行文件、参数和工作目录，保存任务原状态到原 `control_dir/maintenance/`，暂时禁用这些触发并检查无活动 worker/GUI；不终止进程。Python 更新器再持有安装/申购/监控锁，备份受控源码、按清单替换并核对私有配置和账本未变。旧的 wscript → hidden.vbs → run_scheduled.ps1 任务定义仍可使用，不必重建或变更时刻。
-4. 成功后恢复**原来的各个开关**，不主动触发任务，不把原来暂停的实例启用。升级不升级 SDK、不修改旧 v2 路径、不迁移账本。代码备份 ID 由命令返回；保存在原 `control_dir/code-backups/<ID>/rollback.json`。
-5. 运行配置与日历只读检查，核对升级前后配置哈希、账本路径、已存在委托意图、四个开关、桌面显示。真实 miniQMT/Windows 行为及未来自然触发的券商回报由 TARS 本机验收。
-
-源替换失败、配置变动或任务状态恢复不完整时，不冒充成功：保留 maintenance.json 和维护记录，任务可能保持禁用。**先根据记录核验源码与状态，再由 TARS 恢复；不要删除标记后盲目启用。** 旧版 3.2 worker 不认识维护标记，因此第一轮升级必须使用包装器禁用任务并确认进程静止，不能只依赖标记。
-
-## 回滚（只回代码，绝不回滚委托历史）
-
-关闭控制台、等待所有 worker 退出，使用仍保留的新源码包执行：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 `
-  -Mode Rollback -Root 'D:\Existing QMT IPO' -RollbackId '<升级返回的ID>'
-```
-
-它核验备份哈希和目录身份，按相同静止/锁规则恢复旧源码并移除该次新增加的受控文件，保存**当前**配置、账本、所有之后产生的意图/委托、回执和任务原状态。绝不拿升级前数据库覆盖现有数据库。回滚至 3.2 会重新带回“先连接后查日历”的缺陷，且旧版不会读取新增的通知抑制表，旧休市错误可能再次补发；应由 TARS 明确决定是否保持暂停和如何监管，不能假装该缺陷也回滚安全。
-
-## 排错与监督
-
-| 显示/状态 | 含义与处理 |
-|---|---|
-| 非交易日，已跳过 | 正常休市，不要求启动 QMT，不生成连接错误；历史失败记录仍保留。 |
-| 日历未知，禁止提交 | 检查来源/覆盖/原因；按日历文档刷新或导入新年度公告包，不能改成“工作日就放行”。 |
-| 等待开盘 / 午间等待 | 查看 next_due；午间已查询不等于已提交。 |
-| 今日无申购项目 | 必须真实查询并满足原两轮空数据确认，不把连接失败算无项目。 |
-| QMT 连接失败 / 查询未完成 | 查最新 activity.steps、error_code、error_type；确认 miniQMT、登录和 SDK/权限；不重启客户端或补报已有意图。 |
-| 已提交待确认 / 结果不确定 | 核对原账本及券商委托，不删记录，不再次发起。 |
-| 通知失败 | 看业务和监控队列的 pending/failed；检查私有 Webhook 文件。HTTP 200 但业务 errcode 非零仍是失败。 |
-| 启动失败或 worker 超时 | 看 runtime/launcher/latest-*.json 及 latest-*.json；检查私有路径、解释器和账本。超时只处理本 worker，不杀 miniQMT；先核对意图。 |
-| maintenance.json 留存 | 升级/回滚未闭环；按保存的原状态人工恢复，不盲目启动。 |
-
-热回执默认保留 30 天；更旧回执先压缩、逐字节校验后移出热目录，界面仍能读取历史归档。账本、委托审计、每日记录、授权/暂停记录不自动删除。只在保留至少配置数量（默认 30、最少 2）个完整校验通过的账本备份后清理更老的重复备份。新的启动日志为固定 latest 文件，不持续生成任意 SDK 原始输出。旧日志不擅自删除。
-
-**保留完整审计与存储永不增长不能同时保证。** 历史审计归档和源码回滚备份仍需容量管理，默认审计归档超过 1024 MiB 时监控提示；按需迁移到安全存储并核验可恢复，不能自动删除唯一审计副本。具体参数见配置示例。
-
-## 离线验证与交付限制
-
-```powershell
-py -3.11 -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery
-powershell -NoProfile -ExecutionPolicy Bypass -File .\test_tasks.ps1
-```
-
-Linux 可用 `xvfb-run -a python -B -m unittest -v ...` 覆盖 Tk 布局测试。测试只用临时模拟账号、假券商、假消息发送器，禁止 socket；不安装或调用真实 SDK。`test_tasks.ps1` 仅构建禁用任务对象、验证时区/引用/归属和解析脚本，**不注册或执行任务**。
-
-随包提供的 GitHub Actions 工作流设计为只运行这些离线测试并导出 Git 跟踪源码；候选代码尚未完整推送，因此本轮完整 CI 未执行。该工作流没有部署凭据、真实配置、生产环境访问或交易调度。当前测试结果和未验证项目见 [交付审查记录](docs/DELIVERY_REVIEW.md)，AI/TARS 必须先读 [AGENTS.md](AGENTS.md)。历史 3.1/3.2 说明和验收文件仅作为历史记录，不代表本轮生产验收。
-
-
-## 本次 GitHub 交付状态
-
-完整源码批量写入被工具拦截，**本轮完整优化没有推送、没有可部署的完整 PR**。已创建的远端预备分支只有源码导出工作流，不是3.3候选代码。请以本次完整源码包和基于 `922f7b1c193b0b3e180ea09b99dc6f1d89411629` 的补丁审查；由本机TARS按照 [GitHub接续说明](GITHUB_HANDOFF.md) 应用、验证、提交。不得绕过拦截尝试自动写入；本包的交付不代表生产授权。
+`build_release.py --output <源码目录外的新ZIP路径>` 仅从已核验清单生成候选源码包，不包含私有状态，也不代表已签名或已完成生产验收。

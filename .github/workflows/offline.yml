@@ -1,7 +1,7 @@
 name: Offline verification
 on:
   push:
-    branches: ['improve/calendar-gate-portable-delivery-20260912']
+    branches: ['review/delivery-round1-20260914', 'review/delivery-round2-20260914']
   pull_request:
 permissions:
   contents: read
@@ -20,29 +20,53 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Verify delivery manifest (no SDK installation)
+      - name: Verify delivery manifest without SDK installation
         run: python -B -c "from installer import payload; payload('.')"
-      - name: Linux offline business and GUI tests
+      - name: Linux isolated business and GUI tests
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery
-      - name: Windows offline business and GUI tests
+        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2
+      - name: Windows isolated business and GUI tests
         if: runner.os == 'Windows'
-        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery
-      - name: Windows PowerShell definitions and parser checks (no registration)
+        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2
+      - name: Windows definitions and PowerShell parser only
         if: runner.os == 'Windows'
         shell: powershell
         run: '& .\test_tasks.ps1'
+      - name: Build final candidate ZIP
+        run: python -B build_release.py --output "${{ runner.temp }}/round2-final.zip"
+      - name: Verify and extract the locally built candidate without executing it
+        run: >-
+          python -B -c "from package_verify import verify_zip; import zipfile;
+          p=r'${{ runner.temp }}/round2-final.zip'; verify_zip(p);
+          zipfile.ZipFile(p).extractall(r'${{ runner.temp }}/round2-unpacked')"
+      - name: Linux final ZIP regression
+        if: runner.os == 'Linux'
+        working-directory: ${{ runner.temp }}/round2-unpacked/QMT-IPO-3.4.0-alpha2-source
+        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2
+      - name: Windows final ZIP regression
+        if: runner.os == 'Windows'
+        working-directory: ${{ runner.temp }}/round2-unpacked/QMT-IPO-3.4.0-alpha2-source
+        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2
+      - name: Windows final ZIP PowerShell parser checks
+        if: runner.os == 'Windows'
+        shell: powershell
+        working-directory: ${{ runner.temp }}/round2-unpacked/QMT-IPO-3.4.0-alpha2-source
+        run: '& .\test_tasks.ps1'
   source:
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Export tracked source only
-        run: git archive --format=zip --output=source.zip HEAD
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build checked review source after every test job succeeds
+        run: python -B build_release.py --output "$RUNNER_TEMP/qmt-ipo-review-source.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: reviewed-source
-          path: source.zip
-          retention-days: 7
+          name: reviewed-source-candidate
+          path: ${{ runner.temp }}/qmt-ipo-review-source.zip
+          retention-days: 30

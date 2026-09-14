@@ -57,7 +57,7 @@ def backup(source,target):
     os.replace(tmp,target)
 
 
-def validate_config(config):
+def validate_config_shape(config):
     for key in ('account_id','qmt_userdata','state_dir','control_dir','webhook_file'):
         if not isinstance(config.get(key),str) or not config[key].strip():
             raise ValueError('Missing required setting: '+key)
@@ -82,4 +82,11 @@ def validate_config(config):
             raise ValueError('Invalid retention setting: '+key)
     if config.get('calendar_dir') and not Path(config['calendar_dir']).is_absolute():
         raise ValueError('Absolute path required: calendar_dir')
+    return config
+
+
+def validate_config(config):
+    validate_config_shape(config)
+    if (Path(config['control_dir'])/'configuration-pending.json').exists():
+        raise ValueError('Configuration write interrupted; reviewed recovery required')
     return config

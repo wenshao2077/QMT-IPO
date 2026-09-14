@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "version": "3.4.0-alpha2",
+  "target": {
+    "os": "Windows",
+    "architecture": "x64",
+    "python": "3.11.x",
+    "session": "interactive_logged_in_user"
+  },
+  "dependency_pins": {
+    "xtquant": "250807.1.2",
+    "numpy": "1.26.4",
+    "pandas": "2.2.3"
+  },
+  "broker_client_acceptance": [],
+  "production_acceptance": false,
+  "scope": [
+    "SH",
+    "SZ",
+    "KCB_only_if_explicitly_configured"
+  ],
+  "unsupported": [
+    "BJ",
+    "multi_account",
+    "multi_machine_concurrent",
+    "headless_logged_out_service",
+    "automatic_payment",
+    "sell",
+    "QMT_restart"
+  ],
+  "bundled_calendar_covered_through": "2026-12-31",
+  "network_free_install_guaranteed": false,
+  "previous_stage_acceptance": {
+    "version": "3.4.0-alpha1",
+    "source": "user_confirmed_in_conversation",
+    "detailed_environment_or_broker_evidence_attached": false
+  }
+}

@@ -15,6 +15,7 @@ from support import Store, build_plan, positive_int
 from market_calendar import CalendarService, CLOSED, UNKNOWN
 from notification_policy import enqueue_calendar_issue
 from privacy import redact
+from discovery_policy import next_discovery_at
 
 ACCEPTED={'REPORTED','SUCCEEDED'}
 PENDING={'INTENT','UNCERTAIN','SUBMITTED','PENDING','PARTIAL'}
@@ -124,13 +125,13 @@ class Coordinator:
                 'SKIPPED_SCOPE':'未启用的市场，跳过','PREVIEW':'计划预览，未下单',
                 'RETRYABLE':'数据/额度待重试','MISSED':'窗口结束，未提交','EXTERNAL_BLOCKED':'已有异常委托，不重报',
                 'WAITING_WINDOW':'已查询，等待申报时段'}
-        phases={'complete':'本日处理完成','pending':'部分项目待核对或重试','no_ipo':'今日无申购项目',
+        phases={'complete':'截至本轮处理完成','pending':'部分项目待核对或重试','no_ipo':'截至本轮未发现申购项目',
                 'final_attention':'收盘仍有项目需处理','retryable_error':'连接或查询待恢复',
                 'waiting_afternoon':'午间已查询，等待13:00','no_eligible':'已查询，无范围内申购项目',
                 'market_closed':'非交易日，已跳过','calendar_unknown':'日历未知，禁止提交'}
         lines=[f"状态：{phases.get(self.doc['phase'],self.doc['phase'])}；项目：{len(self.doc['items'])}只"]
         if not self.doc['items'] and self.doc['phase']=='no_ipo':
-            lines.append('已分两轮查询确认，今日无新股、新债。')
+            lines.append('截至本轮，两次查询未发现新股、新债；后续仍按检查点复核。')
         for code,item in sorted(self.doc['items'].items()):
             lines.append(f"{code} {item.get('name','')}｜{labels.get(item.get('status'),item.get('status','待处理'))}｜{item.get('quantity',0)}"+('张' if item.get('kind')=='BOND' else '股'))
             if item.get('broker_error'):
@@ -166,9 +167,12 @@ class Coordinator:
             return self.save()
         lunch=T(11,30)<=t<T(13)
         if self.doc.get('completed') and t<T(15):
-            # The daily work is done; only the final 15:05 reconciliation remains.
-            self.activity['outcome']='already_complete'
-            return self.doc
+            # Round completion is not permission to stop discovering for the day.
+            due=next_discovery_at(self.doc.get('discovery_checked_at'),stamp)
+            self.doc['next_due']=due.isoformat()
+            if stamp<due:
+                self.activity['outcome']='already_complete'
+                return self.save()
         self.doc['attempts']+=1
         self.doc['errors']=[]
         self.doc['phase']='running'
@@ -187,6 +191,10 @@ class Coordinator:
             if any(not isinstance(i,dict) or i.get('type') not in ('STOCK','BOND') for i in raw.values()):
                 raise RuntimeError('申购类型或数据结构异常')
             self.activity.update(queried=True,candidate_count=len(raw))
+            checked=self.now()
+            self.doc['discovery_checked_at']=checked.isoformat()
+            self.doc['completion_scope']='observed_round'
+            self.doc['next_due']=next_discovery_at(checked.isoformat(),checked).isoformat()
             self.note('申购数据查询完成：'+str(len(raw))+'条')
             if not raw and not self.doc['items']:
                 previous=self.doc.get('last_empty_at')

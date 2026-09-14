@@ -19,10 +19,11 @@ from runtime import read_json
 from run_history import load_runs
 from support import china_now
 from market_calendar import CalendarService
-from notification_policy import notification_stats
+from notification_policy import notification_stats, combined_notification_stats
+from calendar_health import coverage_report
 
 TASK_NAMES=('QmtIPO3-Cycle','QmtIPO3-Notify','QmtIPO3-Monitor','QmtIPO3-Backup')
-PHASES={'complete':'今日处理完成','no_ipo':'今日无申购项目','no_eligible':'无范围内项目','pending':'部分项目待处理',
+PHASES={'complete':'截至本轮处理完成','no_ipo':'截至本轮未发现申购项目','no_eligible':'无范围内项目','pending':'部分项目待处理',
         'retryable_error':'等待连接或数据恢复','final_attention':'收盘仍需核对',
         'waiting_open':'等待开盘后触发','waiting_afternoon':'等待下午交易时段',
         'market_closed':'非交易日，已跳过','calendar_unknown':'日历未知，禁止提交','waiting_data':'等待数据复核','running':'正在处理'}
@@ -133,17 +134,25 @@ class Backend:
         try:
             cfg=read_json(self.root/'config.json')
         except (OSError,ValueError):
-            cfg={'state_dir':snap['state_dir'],'allowed_markets':snap.get('markets') or ['SH','SZ']}
+            cfg={'state_dir':snap['state_dir'],'control_dir':snap['control_dir'],
+                 'enable_execution':snap.get('execution_enabled',False),
+                 'allowed_markets':snap.get('markets') or ['SH','SZ']}
         snap['calendar']=CalendarService(cfg).decide(day).to_dict()
-        snap['notification_status']={}
-        for name,path in [('business',Path(snap['state_dir'])/'state.sqlite3'),('monitor',control/'monitor.sqlite3')]:
-            try:snap['notification_status'][name]=notification_stats(path)
-            except (sqlite3.Error,OSError):snap['data_errors'].append('notification_status_unavailable')
-        business=snap['notification_status'].get('business',{})
-        monitor=snap['notification_status'].get('monitor',{})
-        snap['pending_notifications']=(business.get('pending') or 0)+(monitor.get('pending') or 0) if business.get('pending') is not None else None
-        snap['failed_notifications']=(business.get('failed') or 0)+(monitor.get('failed') or 0)
-        snap['suppressed_notifications']=(business.get('suppressed') or 0)+(monitor.get('suppressed') or 0)
+        combined=combined_notification_stats(cfg)
+        snap['notification_status']=combined['queues']
+        snap['pending_notifications']=combined['pending']
+        snap['failed_notifications']=combined['failed']
+        snap['suppressed_notifications']=combined['suppressed']
+        snap['last_notification_confirmed_at']=combined['last_confirmed_at']
+        snap['notifications_readable']=combined['readable']
+        if not combined['readable']:
+            snap['data_errors'].append('notification_status_unavailable')
+        try:
+            snap['calendar_coverage']=coverage_report(cfg,day)
+            from app import inspect_health
+            snap['local_health']=inspect_health(cfg,now)
+        except (OSError,ValueError,TypeError,KeyError):
+            snap['local_health']={'status':'unknown','issues':['local_health_unavailable']}
         try:snap['latest_cycle']=read_json(control/'latest-cycle-live.json')
         except (OSError,ValueError):snap['latest_cycle']=None
         history=[]
@@ -194,6 +203,15 @@ class Backend:
         if not confirmed:raise ValueError('发送测试消息必须明确确认')
         from diagnostics import test_notification
         return test_notification(read_json(self.root/'config.json'),confirmed=True)
+
+    def export_support(self, output, confirmed=False):
+        from maintenance import export_support
+        return export_support(self.root, output, confirmed=confirmed,
+                              task_provider=lambda _: self.controller.call('Snapshot'))
+
+    def recovery_plan(self):
+        from maintenance import recovery_plan
+        return recovery_plan(self.root, task_provider=lambda _: self.controller.call('Snapshot'))
 
     def open_logs(self):
         config=read_json(self.root/'config.json')

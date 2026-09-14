@@ -6,11 +6,12 @@ from pathlib import Path
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 
 from panel_backend import Backend, ITEM_STATES, PHASES, TASK_NAMES, plan_state
 from run_history import item_reason, make_row
-from support import china_now
+from support import china_now, CHINA
+from release_info import VERSION
 
 BG='#eef2f7'; WHITE='#ffffff'; INK='#17243b'; MUTED='#69788e'; BLUE='#2859d8'
 SIDEBAR='#14213a'; GREEN='#087e67'; AMBER='#9a6700'; RED='#bb3545'; LINE='#dce3ed'
@@ -75,7 +76,7 @@ class Panel:
         tk.Frame(sidebar,bg='#334460',height=1).pack(fill='x',padx=24,pady=8)
         for text in ('每天自动运行','新股 + 新债','回执与通知','任务异常监控'):
             label(sidebar,'  •  '+text,10,fg='#cad6e8',bg=SIDEBAR).pack(fill='x',padx=18,pady=10)
-        label(sidebar,'桌面版 3.3 RC1\n不开放网络端口',9,fg='#94a7c5',bg=SIDEBAR,justify='left').pack(side='bottom',anchor='w',padx=26,pady=26)
+        label(sidebar,'桌面版 '+VERSION+'\n不开放网络端口',9,fg='#94a7c5',bg=SIDEBAR,justify='left').pack(side='bottom',anchor='w',padx=26,pady=26)
         content=tk.Frame(root,bg=BG,padx=26,pady=22);content.pack(side='left',fill='both',expand=True)
         head=tk.Frame(content,bg=BG);head.pack(fill='x',pady=(0,16))
         label(head,'每日自动打新',23,True,bg=BG).pack(side='left')
@@ -102,6 +103,16 @@ class Panel:
         settings=tk.Frame(notebook,bg=WHITE,padx=20,pady=16)
         history=tk.Frame(notebook,bg=WHITE,padx=16,pady=16)
         notebook.add(runs,text='运行记录');notebook.add(daily,text='今日明细');notebook.add(settings,text='计划与环境');notebook.add(history,text='授权/暂停记录')
+        maintenance=tk.Frame(notebook,bg=WHITE,padx=16,pady=16)
+        notebook.add(maintenance,text='维护与诊断')
+        maintenance_actions=tk.Frame(maintenance,bg=WHITE);maintenance_actions.pack(side='bottom',fill='x',pady=(8,0))
+        self.buttons['support']=button(maintenance_actions,'导出脱敏诊断包',self.export_support)
+        self.buttons['support'].pack(side='left')
+        self.buttons['recovery']=button(maintenance_actions,'查看恢复建议（不修改）',self.recovery_plan)
+        self.buttons['recovery'].pack(side='right')
+        maintenance_scroll=ttk.Scrollbar(maintenance,orient='vertical');maintenance_scroll.pack(side='right',fill='y')
+        self.maintenance=tk.Text(maintenance,wrap='word',font=SMALL,bg=WHITE,fg=INK,relief='flat',height=8,state='disabled',yscrollcommand=maintenance_scroll.set)
+        self.maintenance.pack(side='left',fill='both',expand=True);maintenance_scroll.configure(command=self.maintenance.yview)
         self.run_note=label(runs,'每次自动触发都会列出；双击查看详情。',9,fg=MUTED);self.run_note.pack(fill='x',pady=(0,8))
         runbox=tk.Frame(runs,bg=WHITE);runbox.pack(fill='both',expand=True)
         self.run_table=ttk.Treeview(runbox,columns=('time','action','result','counts','duration'),show='headings',height=6,selectmode='browse')
@@ -186,6 +197,16 @@ class Panel:
                     self.feedback_latched=True
                     if error:
                         self.feedback.configure(text='操作未完成：'+type(error).__name__+'。未确认的状态请以刷新结果为准。',fg=RED)
+                    elif kind=='support':
+                        self.feedback.configure(text='脱敏诊断包已保存到本机；没有上传，不可用于恢复账本。' if data.get('ok') else '诊断导出未完成，未上传文件。',fg=GREEN if data.get('ok') else RED)
+                    elif kind=='recovery':
+                        lines=['恢复建议（只读；没有修改配置、任务、账本或标记）',
+                               '生成于 '+china_now().strftime('%Y-%m-%d %H:%M:%S')+'；再次点击按钮可重新检查。']
+                        lines.extend(x['instruction'] for x in data.get('actions',[]))
+                        if not data.get('actions'):lines.append('当前未发现需处理的本地检查项；不代表交易权限或券商受理验收。')
+                        self.maintenance.configure(state='normal');self.maintenance.delete('1.0','end');self.maintenance.insert('1.0','\n\n'.join(lines));self.maintenance.configure(state='disabled')
+                        self.feedback.configure(text='恢复建议已生成；见“维护与诊断”，没有自动修复。',fg=BLUE)
+                        self.recovery_display=True
                     elif kind in ('validate','test_notify'):
                         ok=data.get('ok') is True
                         text=('配置校验通过；未连接账户、未发送消息。' if kind=='validate' else '测试通知已确认送达；未提交申购。') if ok else '检查未通过：'+'、'.join(data.get('issues',[]) or [data.get('error_type','请查看配置与日志')])
@@ -210,6 +231,8 @@ class Panel:
         self.buttons['check'].configure(state='normal' if not self.busy and self.snapshot else 'disabled')
         for name in ('validate','test_notify'):
             self.buttons[name].configure(state='normal' if not self.busy and self.snapshot else 'disabled')
+        for name in ('support','recovery'):
+            self.buttons[name].configure(state='normal' if not self.busy else 'disabled')
         self.buttons['enable'].configure(text='每日计划已启用' if state=='enabled' else '授权并启用每日打新')
 
     def render(self,data,preserve_feedback=False):
@@ -220,7 +243,12 @@ class Panel:
             'disabled':'点击授权后，Windows 将按每日计划运行；现在不会自动提交申购。',
             'inconsistent':'实际开关与任务状态不一致。请用控制按钮处理，不要重复手动申购。',
             'unknown':'无法确认实际状态，请先恢复状态读取。'}
-        self.subtitle.configure(text=descriptions[state])
+        health=data.get('local_health',{})
+        warnings=health.get('issues',[])
+        coverage=data.get('calendar_coverage',{})
+        attention=bool(warnings) or coverage.get('status') in ('blocked','expiring')
+        self.subtitle.configure(text=descriptions[state]+(' 有维护事项，请查看“维护与诊断”。' if attention else ''))
+        if warnings:self.status.configure(fg=AMBER if state in ('enabled','disabled') else RED)
         if not preserve_feedback and not self.busy and not self.feedback_latched:
             self.feedback.configure(text=('首次控制需要Windows系统授权，程序会自动提示，不用手动以管理员运行。' if data.get('needs_admin') else '任务管理权限已就绪。所有控制操作都有结果回读和记录。'),fg=MUTED)
         doc=data.get('daily')
@@ -235,6 +263,10 @@ class Panel:
         self.cards['next'].configure(text=upcoming)
         pending=data.get('pending_notifications')
         self.cards['notify'].configure(text='待读取' if pending is None else '无待发消息' if pending==0 else f'{pending} 条待发送')
+        if data.get('notifications_readable') is False:
+            self.cards['notify'].configure(text='状态未知，需检查',fg=AMBER)
+        else:
+            self.cards['notify'].configure(fg=INK)
         if pending==0 and data.get('suppressed_notifications'):
             self.cards['notify'].configure(text=f"无待发；{data['suppressed_notifications']} 条已抑制")
         if data.get('failed_notifications'):
@@ -269,7 +301,23 @@ class Panel:
             rows.append(f"{item.get('time','')}  {operation_names.get(item.get('operation'),item.get('operation','操作'))}  {'成功' if item.get('ok') else '未完成'}\n{item.get('error','')}")
         self.history.configure(state='normal');self.history.delete('1.0','end')
         self.history.insert('1.0','\n\n'.join(rows) or '暂无控制操作记录。\n授权、暂停和权限准备的结果会显示在这里。')
-        self.history.configure(state='disabled');self.update_buttons()
+        self.history.configure(state='disabled')
+        if not getattr(self,'recovery_display',False):
+            from maintenance import ISSUES
+            stamp=data.get('last_notification_confirmed_at')
+            try:last=datetime.fromtimestamp(stamp,CHINA).strftime('%Y-%m-%d %H:%M:%S') if stamp else '未知；旧版历史消息没有送达时间，不补造'
+            except (ValueError,TypeError,OverflowError,OSError):last='未知'
+            text=('本地健康：'+{'healthy':'本地检查正常','attention':'有待处理事项','not_activated':'申购未启用','market_closed':'已确认休市','calendar_unknown':'日历未知','outside_window':'非检查时段','unknown':'无法确认'}.get(health.get('status'),'无法确认')+
+                  '\n暂停只停止后续申购，历史待核对结果和通知失败仍需处理。'+
+                  '\n\n日历已逐日检查至：'+str(coverage.get('verified_through') or '未知')+
+                  '\n首次未知日期：'+str(coverage.get('first_unknown_day') or '检查窗口内未发现')+
+                  '\n日历状态：'+{'ready':'检查窗口内覆盖正常','expiring':'覆盖将到期','blocked':'近期日期未知，需核对'}.get(coverage.get('status'),'无法确认')+
+                  '\n最近通知确认送达（北京时间）：'+last+
+                  '\n通知链路失效时不能保证靠同一渠道收到告警，请查看本页。')
+            if coverage.get('issue_code'):text+='\n\n'+ISSUES.get(coverage['issue_code'],('','核对年度日历。'))[1]
+            for code in warnings:text+='\n\n'+ISSUES.get(code,('',{'daily_run_missing':'今日任务漏跑；核对登录状态和计划任务，不手动补单。','daily_work_incomplete':'今日存在未完成项目，请查看明细。','daily_record_missing':'今日记录缺失；不能据此判断无申购。','closeout_failed':'收盘核对未完成，请核对券商回报。','cycle_stuck':'本轮运行时间异常，请保留记录，不强杀客户端。','audit_archive_capacity':'审计归档接近容量阈值；请人工安排备份。'}.get(code,'本地健康状态不可用，请导出诊断包。')))[1]
+            self.maintenance.configure(state='normal');self.maintenance.delete('1.0','end');self.maintenance.insert('1.0',text);self.maintenance.configure(state='disabled')
+        self.update_buttons()
 
     def show_run_detail(self,event=None):
         selection=self.run_table.selection()
@@ -317,6 +365,19 @@ class Panel:
         if not self.confirm('发送测试通知','这会向已配置的企业微信群机器人发送一条测试消息；不会连接交易账户或提交申购。','确认发送测试'):return
         self.busy=True;self.update_buttons()
         self.async_job('test_notify',lambda:self.backend.test_notification(confirmed=True))
+
+    def export_support(self):
+        if self.busy:return
+        if not self.confirm('导出脱敏诊断包','将只导出版本、任务状态、异常数量和日历摘要；不包含账号、Webhook、原始日志或数据库。只保存到本机，分享前请自行审阅。','确认本地导出'):return
+        output=filedialog.asksaveasfilename(parent=self.root,title='保存到安装目录以外',defaultextension='.zip',filetypes=[('ZIP','*.zip')],initialfile='QMT-IPO-support-'+china_now().strftime('%Y%m%d-%H%M%S')+'.zip')
+        if not output:return
+        self.busy=True;self.update_buttons()
+        self.async_job('support',lambda:self.backend.export_support(output,confirmed=True))
+
+    def recovery_plan(self):
+        if self.busy:return
+        self.busy=True;self.update_buttons()
+        self.async_job('recovery',self.backend.recovery_plan)
 
     def open_logs(self):
         try:self.backend.open_logs()

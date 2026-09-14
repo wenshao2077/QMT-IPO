@@ -1,3 +1,9 @@
+# 当前测试入口
+
+3.4.0-alpha1 的本轮结果以 [ROUND1_TEST_RESULTS](docs/ROUND1_TEST_RESULTS.md) 为准。以下保留历史记录，不代表本轮结果。
+
+---
+
 # 3.3.0-rc1 离线验证结果
 
 > 本文保留网页端原始验证记录。后续 Windows 修订与生产升级记录见[Windows安装与升级验收](docs/Windows安装与升级验收.md)。

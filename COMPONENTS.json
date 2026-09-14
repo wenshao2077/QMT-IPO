@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "version": "3.4.0-alpha2",
+  "inventory_kind": "declared_direct_runtime_dependencies_not_full_transitive_SBOM",
+  "dependency_binaries_included": false,
+  "components": [
+    {
+      "name": "numpy",
+      "version": "1.26.4",
+      "bundled": false,
+      "redistribution_permission": "not_asserted"
+    },
+    {
+      "name": "pandas",
+      "version": "2.2.3",
+      "bundled": false,
+      "redistribution_permission": "not_asserted"
+    },
+    {
+      "name": "xtquant",
+      "version": "250807.1.2",
+      "bundled": false,
+      "redistribution_permission": "not_asserted"
+    }
+  ],
+  "runtime": {
+    "name": "CPython",
+    "version_requirement": "3.11.x x64 with Tk",
+    "bundled": false
+  }
+}

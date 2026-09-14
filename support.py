@@ -104,6 +104,13 @@ class Store:
         self.path = Path(path).resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path, timeout=10)
+        try:
+            self._initialize()
+        except BaseException:
+            self.db.close()
+            raise
+
+    def _initialize(self):
         self.db.row_factory = sqlite3.Row
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('PRAGMA synchronous=FULL')
@@ -116,6 +123,8 @@ class Store:
                 id TEXT PRIMARY KEY, content TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0,
                 attempts INTEGER NOT NULL DEFAULT 0, due REAL NOT NULL DEFAULT 0,
                 error TEXT NOT NULL DEFAULT '');
+            CREATE TABLE IF NOT EXISTS notification_delivery_receipts (
+                id TEXT PRIMARY KEY, confirmed_at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS notification_suppressions (
                 id TEXT PRIMARY KEY, reason TEXT NOT NULL, suppressed_at REAL NOT NULL,
                 calendar_source TEXT NOT NULL);
@@ -200,7 +209,11 @@ class Store:
                 break  # Keep page ordering and avoid hammering an unhealthy endpoint.
             else:
                 with self.transaction():
+                    # Only NEW acknowledged sends receive a timestamp. Never backfill
+                    # a made-up time for historical delivered rows or suppressions.
                     self.db.execute('UPDATE outbox SET delivered=1,error=? WHERE id=?', ('', row['id']))
+                    self.db.execute('INSERT OR REPLACE INTO notification_delivery_receipts VALUES(?,?)',
+                                    (row['id'], now()))
         return self.pending_notifications()
 
 
