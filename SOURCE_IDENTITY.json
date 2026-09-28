@@ -6,7 +6,7 @@
   "production_acceptance": false,
   "dependency_binaries_included": false,
   "publisher_signature_included": false,
-  "manifest_sha256": "683a9574dbf85394e2cbfe36028c0465d687c7ee7347f5e18607fc3245b00cef",
+  "manifest_sha256": "5ba28f158b8478e13adc78692bbf66a5b3c1ae905bc85a3641f4553eaf207751",
   "baseline_package_sha256": "a7cc568ff8bdd2258b374aaae91a212cce936ada52dddc0fd7dcc595ea243e5d",
   "components_sha256": "f9b85fd0369376c35edc3e31521191e52f25a0ca757df04394500e246d6cd60e",
   "ancillary_sha256": {

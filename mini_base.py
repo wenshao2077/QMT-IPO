@@ -77,7 +77,9 @@ class MiniBroker:
             orders.append({
                 'code': order.stock_code,
                 'day': datetime.fromtimestamp(stamp, CHINA).date().isoformat(),
-                'order_id': positive_int(order.order_id, '委托号'),
+                # Broker-originated orders can lack a local SDK id. Keep them
+                # in reconciliation/deduplication; submit() still requires > 0.
+                'order_id': positive_int(order.order_id, '委托号', allow_zero=True),
                 'status': statuses.get(order.order_status, 'pending'),
                 'remark': getattr(order, 'order_remark', ''),
             })

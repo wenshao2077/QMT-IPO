@@ -6,11 +6,13 @@ import sqlite3
 import tempfile
 import unittest
 from unittest.mock import Mock,MagicMock,patch
+from types import SimpleNamespace
 
 from app import dispatch,inspect_health
 from coordinator import Coordinator,Ledger,submit_window
 from runtime import atomic_json,backup,single_instance
 from support import CHINA,Store,build_plan,wecom_sender
+from mini_base import MiniBroker
 
 DATE='2026-09-09'
 OPEN=datetime(2026,9,9,9,35,tzinfo=CHINA)
@@ -306,6 +308,40 @@ class DailySystemTests(unittest.TestCase):
         self.assertEqual(self.run_cycle()['phase'],'retryable_error')
         self.assertEqual(self.broker.calls,[])
 
+    def test_zero_id_external_order_still_blocks_duplicate_submission(self):
+        self.broker.order_rows=[{'code':'301111.SZ','day':DATE,'order_id':0,
+                                'status':'reported','remark':''}]
+        result=self.run_cycle()
+        self.assertEqual(result['items']['301111.SZ']['status'],'EXTERNAL_ACCEPTED')
+        self.assertEqual(self.broker.calls,[])
+        self.assertEqual(self.ledger.db.execute('SELECT COUNT(*) FROM intents').fetchone()[0],0)
+
+    def test_closeout_error_preserves_reported_orders_and_explains_failure(self):
+        self.run_cycle()
+        self.clock=OPEN.replace(hour=15,minute=5)
+        self.broker.orders=Mock(side_effect=ValueError('invalid field fake token=hidden'))
+        result=self.run_cycle()
+        self.assertFalse(result['completed'])
+        self.assertEqual(result['items']['301111.SZ']['status'],'REPORTED')
+        self.assertEqual(len(self.broker.calls),1)
+        self.assertEqual(result['last_activity']['error_stage'],'查询并核对券商委托')
+        self.assertNotIn('hidden',result['last_activity']['error_detail'])
+        self.assertNotIn('fake',result['last_activity']['error_detail'])
+        health=inspect_health(self.cfg,self.clock.replace(minute=16))
+        self.assertIn('closeout_failed',health['issues'])
+        self.assertIn('daily_verification_failed',health['issues'])
+        self.assertNotIn('daily_work_incomplete',health['issues'])
+        self.assertEqual(health['unfinished_items'],0)
+
+    def test_zero_submit_result_remains_uncertain_and_never_retries(self):
+        self.broker.order_id=0
+        self.broker.publish=False
+        result=self.run_cycle()
+        self.assertEqual(result['items']['301111.SZ']['status'],'UNCERTAIN')
+        self.clock+=timedelta(minutes=5)
+        self.run_cycle()
+        self.assertEqual(len(self.broker.calls),1)
+
     def test_live_disabled_rejected_before_broker(self):
         self.cfg['enable_execution']=False
         with self.assertRaises(ValueError): self.run_cycle()
@@ -348,6 +384,40 @@ class DailySystemTests(unittest.TestCase):
         with single_instance(self.root/'shared'/'instance.lock'):
             with self.assertRaises(OSError):
                 with single_instance(self.root/'shared'/'instance.lock'): pass
+
+
+class BrokerOrderTests(unittest.TestCase):
+    def setUp(self):
+        self.broker=MiniBroker({'account_id':'fake'})
+        self.broker.account=object()
+        self.broker.constants=SimpleNamespace(ORDER_REPORTED=50,ORDER_SUCCEEDED=56)
+        self.broker.trader=Mock()
+
+    def row(self,code='603218.SH',order_id=0,**changes):
+        return SimpleNamespace(**({'account_id':'fake','stock_code':code,'order_id':order_id,
+            'order_time':int(OPEN.timestamp()),'order_status':56,'order_remark':''}|changes))
+
+    def test_mixed_regular_zero_ids_and_ipo_orders_are_all_retained(self):
+        self.broker.trader.query_stock_orders.return_value=[self.row(),self.row('300682.SZ'),
+            self.row('301111.SZ',101,order_status=50)]
+        rows=self.broker.orders()
+        self.assertEqual([r['order_id'] for r in rows],[0,0,101])
+        self.assertEqual([r['status'] for r in rows],['succeeded','succeeded','reported'])
+        self.assertTrue(all(r['day']==DATE for r in rows))
+
+    def test_invalid_ids_still_fail_the_complete_query(self):
+        for value in (-1,1.5,True,None,'bad',float('nan')):
+            with self.subTest(value=value):
+                self.broker.trader.query_stock_orders.return_value=[self.row(order_id=value)]
+                with self.assertRaises((ValueError,TypeError)):
+                    self.broker.orders()
+
+    def test_zero_id_does_not_bypass_account_or_time_validation(self):
+        for fields in ({'account_id':'other'},{'order_time':0},{'order_time':int(OPEN.timestamp())*1000}):
+            with self.subTest(fields=fields):
+                self.broker.trader.query_stock_orders.return_value=[self.row(**fields)]
+                with self.assertRaises((RuntimeError,ValueError)):
+                    self.broker.orders()
 
 
 class NotificationTests(unittest.TestCase):

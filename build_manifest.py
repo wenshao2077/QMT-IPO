@@ -28,6 +28,7 @@ SOURCE_FILES = (
     'delivery/start.ps1',
     'docs/FINAL_DELIVERY.md',
     'docs/ROUND3.md',
+    'docs/20260928收盘核对修复.md',
     'test_final_delivery.py',
     'calendar_health.py',
     'calendar_tool.py',

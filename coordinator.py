@@ -178,13 +178,17 @@ class Coordinator:
         self.doc['phase']='running'
         self.save()
         connected=False
+        stage='连接QMT'
         try:
             self.note('开始连接QMT')
             self.broker.connect()
             connected=True
+            stage='检查账户状态'
             self.broker.ready()
             self.note('连接与账户状态正常')
+            stage='查询并核对券商委托'
             self.synchronize(self.orders())
+            stage='查询申购项目'
             raw=self.broker.ipos()
             if not isinstance(raw,dict):
                 raise RuntimeError('申购数据不可用，不能当作没有新股新债')
@@ -215,6 +219,7 @@ class Coordinator:
             if any(self.doc['items'][c].get('status') not in DONE for c in missing):
                 self.doc['errors'].append('此前发现的申购项目在最新返回中缺失，保留原记录并继续核对。')
             for code,info in sorted(raw.items()):
+                stage='处理申购项目'
                 item=self.doc['items'].setdefault(code,{'code':code})
                 item.update(name=str(info.get('name',code))[:80],kind=info['type'])
                 prior=self.ledger.get(self.account,self.day,code)
@@ -236,6 +241,7 @@ class Coordinator:
                     item.update(status='RETRYABLE',reason=type(exc).__name__)
                     continue
                 # The second read includes manual orders and other programs.
+                stage='提交前核对券商委托'
                 orders=self.orders()
                 existing=[o for o in orders if o['code']==code]
                 if existing:
@@ -250,11 +256,13 @@ class Coordinator:
                 if self.mode=='preview':
                     item['status']='PREVIEW'
                     continue
+                stage='提交前检查账户状态'
                 self.broker.ready()  # Last read-only readiness check before durable intent.
                 current=self.now()
                 if not submit_window(current) or current.date().isoformat()!=self.day:
                     self.defer(item,current)
                     continue
+                stage='登记申购意图'
                 if not self.ledger.reserve(self.account,plan):
                     item['status']='INTENT'
                     continue
@@ -269,6 +277,7 @@ class Coordinator:
                     self.ledger.record(self.account,self.day,code,'SUBMITTED',order_id)
                     item.update(status='SUBMITTED',order_id=order_id)
                     self.activity['submitted']+=1
+            stage='最终核对券商委托'
             self.synchronize(self.orders())
             t=self.now().time().replace(tzinfo=None)
             lunch=T(11,30)<=t<T(13)
@@ -283,12 +292,17 @@ class Coordinator:
                     self.doc['phase']='no_eligible'
                 self.activity['outcome']=self.doc['phase']
             self.note('本轮完成：提交'+str(self.activity['submitted'])+'笔')
+            stage='生成结果通知'
             self.summary()
         except Exception as exc:
             self.activity['outcome']='query_error' if connected else 'connection_error'
             self.activity['error_code']='qmt_query_failed' if connected else 'qmt_connection_failed'
+            self.activity['error_stage']=stage
+            self.activity['error_type']=type(exc).__name__
+            self.activity['error_detail']=redact(str(exc),self.config)[:400]
             self.doc.update(completed=False,phase='final_attention' if t>T(14,50) else 'retryable_error')
-            self.doc['errors']=[f'连接/查询未完成（{type(exc).__name__}）；仅未发起过的项目允许后续尝试。']
+            accepted=sum(i.get('status') in ACCEPTED|{'EXTERNAL_ACCEPTED'} for i in self.doc['items'].values())
+            self.doc['errors']=[f'{stage}未完成（{type(exc).__name__}）；此前已核对有效委托{accepted}项，本轮新增提交{self.activity["submitted"]}笔。已有请求不重发，详见运行记录。']
             # One notification per error type / 30-minute bucket, not every poll.
             self.message(f'error:{type(exc).__name__}:{int(stamp.timestamp()//1800)}',self.doc['errors'][0])
         finally:

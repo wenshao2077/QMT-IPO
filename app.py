@@ -14,7 +14,7 @@ import time
 import uuid
 
 from broker import Broker, ReadOnlyBroker
-from coordinator import Coordinator, Ledger
+from coordinator import Coordinator, Ledger, DONE
 from runtime import atomic_json, backup, read_json, single_instance, validate_config
 from support import Store, china_now, wecom_sender
 from market_calendar import CalendarService, CLOSED, UNKNOWN, ensure_calendar
@@ -73,7 +73,11 @@ def inspect_health(config,now=None):
             safe={'SKIPPED_SCOPE','SKIPPED_QUOTA','WAITING_WINDOW','REPORTED','SUCCEEDED','EXTERNAL_ACCEPTED','PREVIEW'}
             waiting=now<due and all(i.get('status') in safe for i in doc.get('items',{}).values())
         if not doc.get('completed') and not waiting and now.strftime('%H:%M')>='09:45':
-            info['issues'].append('daily_work_incomplete')
+            items=doc.get('items',{})
+            pending=sum(item.get('status') not in DONE for item in items.values())
+            info['unfinished_items']=pending
+            info['recorded_items']=len(items)
+            info['issues'].append('daily_verification_failed' if items and not pending and doc.get('errors') else 'daily_work_incomplete')
         if not doc.get('completed') and now.strftime('%H:%M')>='15:10':
             info['issues'].append('closeout_failed')
     except (OSError,ValueError,KeyError,TypeError):
@@ -101,6 +105,7 @@ def watch(config,send=False,now=None):
         if issues and count>=2 and (issues!=before.get('last_alert_issues') or now.timestamp()-last>=1800):
             labels={'cycle_stuck':'任务长时间未结束','daily_run_missing':'今日定时任务漏跑',
                     'daily_work_incomplete':'今日仍有未完成项目','closeout_failed':'收盘核对未完成',
+                    'daily_verification_failed':'已记录项目均已处理，但最新查询核验失败（不代表漏报）',
                     'daily_record_missing':'今日运行记录缺失','notification_backlog':'通知连续失败并积压',
                     'ledger_unavailable':'去重账本不可读','monitor_ledger_unavailable':'监控通知账本不可读','audit_archive_capacity':'审计归档接近容量阈值，请离线备份并核验'}
             text='自动打新异常：'+'；'.join(labels.get(i,i) for i in issues)+'。请查看每日状态；监控未重启、未补单。'
