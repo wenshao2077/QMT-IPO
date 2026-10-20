@@ -371,8 +371,9 @@ class DailySystemTests(unittest.TestCase):
         from panel_backend import ITEM_STATES
         self.assertIn('已确认',ITEM_STATES['CONFIRMED'])
         messages='\n'.join(r[0] for r in self.ledger.db.execute('SELECT content FROM outbox'))
-        self.assertIn('券商已确认',messages)
-        self.assertIn('不代表中签',messages)
+        from notification_card import PREFIX
+        self.assertIn(PREFIX,messages)
+        self.assertNotIn('SKIPPED_SCOPE',messages)
 
     def test_external_confirmed_order_blocks_submission_without_new_intent(self):
         self.broker.order_rows=[{'code':'301111.SZ','day':DATE,'order_id':0,

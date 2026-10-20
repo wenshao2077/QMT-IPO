@@ -156,6 +156,14 @@ class Store:
         with self.transaction():
             self._event(key, content)
 
+    def image_event(self, key, card):
+        from notification_card import encode_card
+        content = encode_card(card)
+        identity = hashlib.sha256(key.encode()).hexdigest()[:16]
+        with self.transaction():
+            self.db.execute('INSERT OR IGNORE INTO outbox(id,content) VALUES(?,?)',
+                            (f'{identity}:000001', content))
+
     def get(self, account, day, code):
         return self.db.execute('SELECT * FROM intents WHERE account=? AND day=? AND code=?',
                                (account, day, code)).fetchone()
@@ -231,8 +239,11 @@ def wecom_sender(webhook, opener=None):
     opener = opener or build_opener(NoRedirect())
 
     def send(content):
+        from notification_card import PREFIX, image_payload
+        payload = (image_payload(content) if content.startswith(PREFIX) else
+                   {'msgtype': 'text', 'text': {'content': content}})
         request = Request(webhook, data=json.dumps(
-            {'msgtype': 'text', 'text': {'content': content}}, ensure_ascii=False).encode('utf-8'),
+            payload, ensure_ascii=False).encode('utf-8'),
             headers={'Content-Type': 'application/json; charset=utf-8'}, method='POST')
         try:
             with opener.open(request, timeout=10) as response:

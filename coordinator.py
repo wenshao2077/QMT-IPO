@@ -119,6 +119,18 @@ class Coordinator:
                     item['broker_error']=error.get('message','券商错误回报')
 
     def summary(self):
+        if self.mode=='live':
+            from notification_card import result_cards, encode_card
+            cards=result_cards(self.doc)
+            if cards is not None:
+                for card in cards:
+                    for item in card['items']:
+                        item['name']=redact(item['name'],self.config)[:80]
+                    # Normalized display identity: REPORTED -> CONFIRMED is not
+                    # another successful subscription and must not resend a card.
+                    fingerprint=hashlib.sha256(encode_card(card).encode()).hexdigest()[:16]
+                    self.ledger.image_event(f'v3:{self.account}:{self.day}:result-card:{fingerprint}',card)
+                return
         labels={'REPORTED':'已报','SUCCEEDED':'已成','CONFIRMED':'券商已确认','EXTERNAL_ACCEPTED':'已有有效委托，跳过',
                 'REJECTED':'废单待核对','CANCELED':'已撤待核对','PENDING':'等待回报',
                 'SUBMITTED':'已提交待确认','INTENT':'意图已登记待核对','UNCERTAIN':'结果不确定，不重发',
@@ -134,6 +146,8 @@ class Coordinator:
         if not self.doc['items'] and self.doc['phase']=='no_ipo':
             lines.append('截至本轮，两次查询未发现新股、新债；后续仍按检查点复核。')
         for code,item in sorted(self.doc['items'].items()):
+            if self.mode=='live' and item.get('status')=='SKIPPED_SCOPE':
+                continue
             lines.append(f"{code} {item.get('name','')}｜{labels.get(item.get('status'),item.get('status','待处理'))}｜{item.get('quantity',0)}"+('张' if item.get('kind')=='BOND' else '股'))
             if item.get('broker_error'):
                 lines.append(item['broker_error'])
