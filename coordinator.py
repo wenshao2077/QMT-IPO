@@ -17,10 +17,10 @@ from notification_policy import enqueue_calendar_issue
 from privacy import redact
 from discovery_policy import next_discovery_at
 
-ACCEPTED={'REPORTED','SUCCEEDED'}
+ACCEPTED={'REPORTED','SUCCEEDED','CONFIRMED'}
 PENDING={'INTENT','UNCERTAIN','SUBMITTED','PENDING','PARTIAL'}
 DONE=ACCEPTED|{'EXTERNAL_ACCEPTED','SKIPPED_QUOTA','SKIPPED_SCOPE','PREVIEW'}
-STATUS_MAP={'reported':'REPORTED','succeeded':'SUCCEEDED','partial':'PARTIAL',
+STATUS_MAP={'reported':'REPORTED','succeeded':'SUCCEEDED','confirmed':'CONFIRMED','partial':'PARTIAL',
             'rejected':'REJECTED','canceled':'CANCELED'}
 
 
@@ -109,6 +109,7 @@ class Coordinator:
                 state=STATUS_MAP.get(order.get('status'),'PENDING')
                 self.ledger.record(self.account,self.day,code,state,order.get('order_id'))
                 item.update(status=state,order_id=order.get('order_id'),reason='券商委托查询')
+                item['broker_status_code']=order.get('raw_status')
             else:
                 item.update(status=row['state'],order_id=row['order_id'],reason='已有请求，当前未能唯一核对；不重发')
         for error in self.broker.drain_errors():
@@ -118,7 +119,7 @@ class Coordinator:
                     item['broker_error']=error.get('message','券商错误回报')
 
     def summary(self):
-        labels={'REPORTED':'已报','SUCCEEDED':'已成','EXTERNAL_ACCEPTED':'已有有效委托，跳过',
+        labels={'REPORTED':'已报','SUCCEEDED':'已成','CONFIRMED':'券商已确认','EXTERNAL_ACCEPTED':'已有有效委托，跳过',
                 'REJECTED':'废单待核对','CANCELED':'已撤待核对','PENDING':'等待回报',
                 'SUBMITTED':'已提交待确认','INTENT':'意图已登记待核对','UNCERTAIN':'结果不确定，不重发',
                 'PARTIAL':'部分成交待核对','SKIPPED_QUOTA':'无足额额度，跳过',
@@ -136,10 +137,12 @@ class Coordinator:
             lines.append(f"{code} {item.get('name','')}｜{labels.get(item.get('status'),item.get('status','待处理'))}｜{item.get('quantity',0)}"+('张' if item.get('kind')=='BOND' else '股'))
             if item.get('broker_error'):
                 lines.append(item['broker_error'])
+            elif item.get('status')=='PENDING' and item.get('broker_status_code') is not None:
+                lines.append(f"券商原始状态码：{item['broker_status_code']}；仅核对，不重发。")
             elif item.get('reason') and item.get('status') in ('SKIPPED_SCOPE','WAITING_WINDOW'):
                 lines.append(item['reason'])
         lines.extend(self.doc.get('errors',[]))
-        lines.append('委托已报/已成不代表中签；本程序不卖出、不缴款。')
+        lines.append('委托已报/已成/已确认不代表中签；本程序不卖出、不缴款。')
         text=redact('\n'.join(lines),self.config)
         fingerprint=hashlib.sha256(text.encode()).hexdigest()[:16]
         self.message('summary:'+fingerprint,text)
@@ -245,7 +248,7 @@ class Coordinator:
                 orders=self.orders()
                 existing=[o for o in orders if o['code']==code]
                 if existing:
-                    item['status']='EXTERNAL_ACCEPTED' if any(o.get('status') in ('reported','succeeded') for o in existing) else 'EXTERNAL_BLOCKED'
+                    item['status']='EXTERNAL_ACCEPTED' if any(STATUS_MAP.get(o.get('status')) in ACCEPTED for o in existing) else 'EXTERNAL_BLOCKED'
                     continue
                 if not plan.quantity:
                     item['status']='SKIPPED_QUOTA'

@@ -342,6 +342,61 @@ class DailySystemTests(unittest.TestCase):
         self.run_cycle()
         self.assertEqual(len(self.broker.calls),1)
 
+    def test_reported_then_confirmed_closeout_is_complete_without_resubmit(self):
+        self.broker.items={'371018.SZ':info('BOND'),'920306.BJ':info()}
+        first=self.run_cycle()
+        self.assertEqual(first['items']['371018.SZ']['status'],'REPORTED')
+        adapter=MiniBroker({'account_id':'fake'})
+        adapter.account=object()
+        adapter.constants=SimpleNamespace(ORDER_REPORTED=50,ORDER_SUCCEEDED=56)
+        adapter.trader=Mock()
+        adapter.trader.query_stock_orders.return_value=[SimpleNamespace(
+            account_id='fake',stock_code='371018.SZ',order_id=101,
+            order_time=int(OPEN.timestamp()),order_status=86,order_remark='')]
+        self.broker.orders=adapter.orders
+        for hour,minute in ((14,0),(15,5),(15,10)):
+            self.clock=OPEN.replace(hour=hour,minute=minute)
+            result=self.run_cycle()
+            self.assertTrue(result['completed'])
+            self.assertEqual(result['items']['371018.SZ']['status'],'CONFIRMED')
+            self.assertEqual(result['items']['371018.SZ']['broker_status_code'],86)
+            self.assertEqual(result['items']['920306.BJ']['status'],'SKIPPED_SCOPE')
+            health=inspect_health(self.cfg,self.clock)
+            self.assertNotIn('daily_work_incomplete',health['issues'])
+            self.assertNotIn('closeout_failed',health['issues'])
+        self.assertEqual(len(self.broker.calls),1)
+        self.assertEqual(self.ledger.db.execute('SELECT state FROM intents').fetchone()[0],'CONFIRMED')
+        from maintenance import ledger_summary
+        self.assertEqual(ledger_summary(self.root/'shared/state.sqlite3')['unresolved_count'],0)
+        from panel_backend import ITEM_STATES
+        self.assertIn('已确认',ITEM_STATES['CONFIRMED'])
+        messages='\n'.join(r[0] for r in self.ledger.db.execute('SELECT content FROM outbox'))
+        self.assertIn('券商已确认',messages)
+        self.assertIn('不代表中签',messages)
+
+    def test_external_confirmed_order_blocks_submission_without_new_intent(self):
+        self.broker.order_rows=[{'code':'301111.SZ','day':DATE,'order_id':0,
+                                'status':'confirmed','raw_status':86,'remark':''}]
+        result=self.run_cycle()
+        self.assertTrue(result['completed'])
+        self.assertEqual(result['items']['301111.SZ']['status'],'EXTERNAL_ACCEPTED')
+        self.assertEqual(self.broker.calls,[])
+        self.assertEqual(self.ledger.db.execute('SELECT COUNT(*) FROM intents').fetchone()[0],0)
+
+    def test_unknown_status_after_reported_still_alerts_and_never_resubmits(self):
+        self.run_cycle()
+        self.broker.order_rows[0].update(status='pending',raw_status=255)
+        self.clock=OPEN.replace(hour=15,minute=5)
+        result=self.run_cycle()
+        self.assertFalse(result['completed'])
+        self.assertEqual(result['items']['301111.SZ']['status'],'PENDING')
+        self.assertEqual(len(self.broker.calls),1)
+        self.assertIn('daily_work_incomplete',inspect_health(self.cfg,self.clock)['issues'])
+        from maintenance import ledger_summary
+        self.assertEqual(ledger_summary(self.root/'shared/state.sqlite3')['unresolved_count'],1)
+        messages='\n'.join(r[0] for r in self.ledger.db.execute('SELECT content FROM outbox'))
+        self.assertIn('券商原始状态码：255',messages)
+
     def test_live_disabled_rejected_before_broker(self):
         self.cfg['enable_execution']=False
         with self.assertRaises(ValueError): self.run_cycle()
@@ -404,6 +459,14 @@ class BrokerOrderTests(unittest.TestCase):
         self.assertEqual([r['order_id'] for r in rows],[0,0,101])
         self.assertEqual([r['status'] for r in rows],['succeeded','succeeded','reported'])
         self.assertTrue(all(r['day']==DATE for r in rows))
+
+    def test_confirmed_without_sdk_constant_is_distinct_from_fill(self):
+        self.broker.trader.query_stock_orders.return_value=[
+            self.row('371018.SZ',101,order_status=86),
+            self.row('301111.SZ',102,order_status=255)]
+        rows=self.broker.orders()
+        self.assertEqual([(r['status'],r['raw_status']) for r in rows],
+                         [('confirmed',86),('pending',255)])
 
     def test_invalid_ids_still_fail_the_complete_query(self):
         for value in (-1,1.5,True,None,'bad',float('nan')):

@@ -27,7 +27,7 @@ PHASES={'complete':'截至本轮处理完成','no_ipo':'截至本轮未发现申
         'retryable_error':'等待连接或数据恢复','final_attention':'收盘仍需核对',
         'waiting_open':'等待开盘后触发','waiting_afternoon':'等待下午交易时段',
         'market_closed':'非交易日，已跳过','calendar_unknown':'日历未知，禁止提交','waiting_data':'等待数据复核','running':'正在处理'}
-ITEM_STATES={'REPORTED':'券商已报','SUCCEEDED':'券商已成','EXTERNAL_ACCEPTED':'已有委托，已跳过',
+ITEM_STATES={'REPORTED':'券商已报','SUCCEEDED':'券商已成','CONFIRMED':'券商已确认（非中签）','EXTERNAL_ACCEPTED':'已有委托，已跳过',
              'REJECTED':'废单待核对','CANCELED':'已撤待核对','PENDING':'等待回报',
              'SUBMITTED':'已提交待确认','INTENT':'请求已登记','UNCERTAIN':'结果待核对',
              'PARTIAL':'部分成交待核对','SKIPPED_QUOTA':'额度不足','SKIPPED_SCOPE':'不在启用范围',

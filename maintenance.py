@@ -117,7 +117,7 @@ def ledger_summary(path):
                 raise MaintenanceError('ledger_schema_failed')
             count = db.execute('SELECT COUNT(*) FROM intents').fetchone()[0]
             # Unknown future states also require review; do not export arbitrary state text.
-            unresolved = db.execute("SELECT COUNT(*) FROM intents WHERE state NOT IN ('REPORTED','SUCCEEDED','EXTERNAL_ACCEPTED')").fetchone()[0]
+            unresolved = db.execute("SELECT COUNT(*) FROM intents WHERE state NOT IN ('REPORTED','SUCCEEDED','CONFIRMED','EXTERNAL_ACCEPTED')").fetchone()[0]
             return {'status': 'readable', 'intent_count': count, 'unresolved_count': unresolved}
         finally:
             db.close()

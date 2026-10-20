@@ -66,6 +66,10 @@ class MiniBroker:
         }
         statuses = {getattr(self.constants, k): v for k, v in status_names.items()
                     if hasattr(self.constants, k)}
+        # QMT EEntrustStatus: 86 = ENTRUST_STATUS_DETERMINED (已确认).
+        # xtquant 250807.1.2 does not expose an ORDER_* constant for it.
+        # Confirmation is acceptance, not a fill or an IPO allotment.
+        statuses[86] = 'confirmed'
         orders = []
         for order in raw:
             # Scope to requested account even if broker unexpectedly returns mixed data.
@@ -81,6 +85,7 @@ class MiniBroker:
                 # in reconciliation/deduplication; submit() still requires > 0.
                 'order_id': positive_int(order.order_id, '委托号', allow_zero=True),
                 'status': statuses.get(order.order_status, 'pending'),
+                'raw_status': order.order_status,
                 'remark': getattr(order, 'order_remark', ''),
             })
         return orders

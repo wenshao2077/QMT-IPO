@@ -1,5 +1,15 @@
 # 3.4.0 当前验证记录
 
+## 2026-10-20 已确认状态识别修复
+
+Windows x64，隔离 uv Python 3.11.15、SQLite 3.50.4：11组完整回归共268项通过，0失败、0错误、0跳过；其中新增4项覆盖原始状态86、已报转已确认的收盘闭环、外部已确认委托去重、未知状态继续告警。PS7与PS5.1任务定义及14个脚本解析检查均通过，没有注册或触发任务。
+
+验证命令：`uv run --no-project --python 3.11 python -B -m unittest -q test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery`；`pwsh -NoProfile -File test_tasks.ps1`；`powershell -NoProfile -File test_tasks.ps1`。仅合成账户与委托，不连接生产账户；原始现场取证与生产升级另据目标机回执。
+
+本节为本轮结果。以下日期保留历史记录。
+
+---
+
 2026-09-14，Windows build 26200 x64：原246项加11项缺陷/离线依赖回归，共257项全部通过，0失败、0错误、0跳过。先以隔离 Python 3.11.15 通过256项，追加外部账本导出保护后，以随包 Python 3.11.16 完成257项；最终ZIP解压回归另记于外部验收记录。PS5.1/PS7 均通过四个禁用任务定义、时区/归属和14个PowerShell脚本解析。
 
 本机隔离目录已执行真实离线 New：无预装依赖、固定Python缓存创建、7个锁定wheel安装、pip check、Tk创建/销毁、4个实际注册任务全部Disabled、配置false/占位账号、空通知地址。ResumeNew重复执行返回already_installed。没有导入SDK或连接账户。最新最终ZIP验证、升级回滚/移动包验证、源码提交及哈希以包外验收记录为准，避免将ZIP自身哈希递归写入包内。

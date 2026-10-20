@@ -70,7 +70,7 @@ def inspect_health(config,now=None):
         waiting=False
         if doc['phase'] in ('waiting_open','waiting_afternoon') and doc.get('next_due') and not doc.get('errors'):
             due=datetime.fromisoformat(doc['next_due'])
-            safe={'SKIPPED_SCOPE','SKIPPED_QUOTA','WAITING_WINDOW','REPORTED','SUCCEEDED','EXTERNAL_ACCEPTED','PREVIEW'}
+            safe=DONE|{'WAITING_WINDOW'}
             waiting=now<due and all(i.get('status') in safe for i in doc.get('items',{}).values())
         if not doc.get('completed') and not waiting and now.strftime('%H:%M')>='09:45':
             items=doc.get('items',{})
