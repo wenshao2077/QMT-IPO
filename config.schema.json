@@ -12,6 +12,12 @@
     "enable_execution"
   ],
   "properties": {
+    "execution_start_date": {"type":"string", "format":"date", "description":"Earliest authorized subscription day in Asia/Shanghai; queries remain available before activation."},
+    "notification_mode": {
+      "enum": ["enabled", "pending_address"],
+      "default": "enabled",
+      "description": "Owner-authorized address deferral: keep durable notifications without HTTP delivery or failed-attempt counters."
+    },
     "instance_label": {"type": "string", "maxLength": 16},
     "task_prefix": {
       "type": "string",

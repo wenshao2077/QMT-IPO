@@ -411,6 +411,102 @@ class DualTests(unittest.TestCase):
         self.ledger.reserve('existing',self.plan)
         with self.assertRaises(ValueError):initialize_prefix(self.root,'QmtIPO-Northeast')
 
+    def test_pending_address_cycle_retains_notifications_and_never_uses_old_hook(self):
+        from app import dispatch
+        cfg=dict(self.cfg,notification_mode='pending_address')
+        (self.root/'hook').write_text('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=old-synthetic','utf-8')
+        with patch('app.wecom_sender',side_effect=AssertionError('No destination authorized')), patch('native_broker.china_now',return_value=NOW):
+            result=dispatch('cycle',cfg,live=True,send=True,broker_factory=lambda _:self.broker,now=lambda:NOW)
+        self.assertEqual(result['status'],'finished')
+        self.assertEqual(self.api['passorder'].call_count,1)
+        self.assertEqual(result['result']['notification_delivery'],'pending_address')
+        self.assertGreater(result['result']['pending_notifications'],0)
+        self.assertEqual(self.ledger.db.execute('SELECT SUM(attempts) FROM outbox').fetchone()[0],0)
+
+    def test_pending_address_notify_has_success_exit_without_losing_queue(self):
+        from app import main
+        import contextlib,io
+        self.ledger.event('pending-destination','synthetic-message')
+        atomic_json(self.root/'config.json',dict(self.cfg,notification_mode='pending_address'))
+        with patch('app.wecom_sender',side_effect=AssertionError('No delivery')),contextlib.redirect_stdout(io.StringIO()):
+            rc=main(['notify','--config',str(self.root/'config.json'),'--send'])
+        self.assertEqual(rc,0)
+        self.assertEqual(self.ledger.pending_notifications(),1)
+        self.assertEqual(self.ledger.db.execute('SELECT attempts FROM outbox').fetchone()[0],0)
+
+    def test_pending_address_monitor_never_sends_or_marks_delivery(self):
+        from app import watch
+        cfg=dict(self.cfg,notification_mode='pending_address')
+        with patch('app.wecom_sender',side_effect=AssertionError('No delivery')):
+            watch(cfg,send=True,now=NOW)
+            report=watch(cfg,send=True,now=NOW+timedelta(minutes=5))
+        self.assertEqual(report['notification_delivery'],'pending_address')
+        import sqlite3
+        db=sqlite3.connect(self.root/'runtime/monitor.sqlite3')
+        try:self.assertEqual(db.execute('SELECT SUM(attempts) FROM outbox').fetchone()[0],0)
+        finally:db.close()
+
+    def test_pending_address_diagnostics_allow_empty_hook_and_show_deferral(self):
+        from diagnostics import configuration_report,test_notification
+        cfg=dict(self.cfg,notification_mode='pending_address')
+        report=configuration_report(cfg,check_environment=False)
+        self.assertTrue(report['ok'])
+        self.assertEqual(report['notification_delivery'],'pending_address')
+        with self.assertRaisesRegex(ValueError,'destination_pending'):test_notification(cfg,confirmed=True)
+        self.assertIn('webhook_missing_or_invalid',configuration_report(self.cfg,check_environment=False)['issues'])
+
+    def test_destination_resume_drains_existing_messages_without_resubmitting(self):
+        from app import dispatch
+        self.ledger.event('pending-destination','synthetic-message')
+        (self.root/'hook').write_text('https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=new-synthetic','utf-8')
+        sender=Mock()
+        with patch('app.wecom_sender',return_value=sender):
+            result=dispatch('notify',dict(self.cfg,notification_mode='enabled'),send=True,now=lambda:NOW)
+        self.assertEqual(result['status'],'finished')
+        self.assertEqual(self.ledger.pending_notifications(),0)
+        self.assertEqual(sender.call_count,1)
+        self.api['passorder'].assert_not_called()
+
+    def test_unknown_notification_mode_is_rejected(self):
+        with self.assertRaises(ValueError):validate_config(dict(self.cfg,notification_mode='guess'))
+
+    def test_future_activation_does_not_connect_or_reserve_today(self):
+        cfg=dict(self.cfg,execution_start_date='2026-10-27')
+        broker=Mock()
+        result=Coordinator(cfg,broker,self.ledger,lambda:NOW,'live').run()
+        self.assertEqual(result['phase'],'waiting_activation')
+        broker.connect.assert_not_called()
+        self.assertEqual(self.ledger.db.execute('SELECT COUNT(*) FROM intents').fetchone()[0],0)
+
+    def test_future_activation_does_not_raise_todays_missing_run_alarm(self):
+        from app import watch,inspect_health
+        cfg=dict(self.cfg,execution_start_date='2026-10-27',notification_mode='pending_address')
+        watch(cfg,send=False,now=NOW)
+        report=inspect_health(cfg,NOW)
+        self.assertEqual(report['status'],'waiting_activation')
+        self.assertNotIn('daily_run_missing',report['issues'])
+
+    def test_native_independently_rejects_a_pre_activation_submission(self):
+        atomic_json(self.root/'config.json',dict(self.cfg,execution_start_date='2026-10-27'))
+        with self.assertRaisesRegex(ValueError,'disabled'):self.service.handle(self.request())
+        self.api['passorder'].assert_not_called()
+        self.assertFalse(list((self.root/'native/claims').glob('*.json')))
+
+    def test_launcher_blocks_early_logon_even_if_scheduler_is_misconfigured(self):
+        from launcher import run
+        atomic_json(self.root/'config.json',dict(self.cfg,execution_start_date='2026-10-27'))
+        runner=Mock()
+        with patch('launcher.china_now',return_value=NOW):result=run(self.root,'cycle',runner)
+        self.assertEqual(result['status'],'waiting_activation')
+        runner.assert_not_called()
+
+    def test_activation_date_is_strict_and_old_instances_remain_due(self):
+        from runtime import execution_due
+        for value in ('2026-2-7','invalid',True):
+            with self.assertRaises((ValueError,TypeError)):validate_config(dict(self.cfg,execution_start_date=value))
+        self.assertTrue(execution_due(self.cfg,'2026-10-26'))
+        self.assertTrue(execution_due(dict(self.cfg,execution_start_date='2026-10-27'),'2026-10-27'))
+
     def test_rebind_changes_transport_only_while_paused_and_retains_used_intent(self):
         from rebind_client import rebind
         cfg=dict(self.cfg,enable_execution=False)

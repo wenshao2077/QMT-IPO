@@ -21,6 +21,7 @@ $cycle=@($defs|Where-Object Name -eq 'QmtIPO3-Cycle')[0].Task
 if($cycle.Triggers.Count -ne 3){throw 'Daily, final and logon triggers required'}
 if($cycle.Triggers[0].StartBoundary -ne '2026-09-14T09:35:00+08:00'){throw 'Submit schedule changed'}
 if($cycle.Triggers[1].StartBoundary -ne '2026-09-14T15:05:00+08:00'){throw 'Final reconciliation schedule changed'}
+if($cycle.Triggers[2].StartBoundary -ne '2026-09-14T00:00:00+08:00'){throw 'Logon may not run before the approved first day'}
 if($cycle.Triggers[0].Repetition.Interval -ne 'PT5M'){throw 'Polling interval changed'}
 $bad=[pscustomobject]@{Actions=@([pscustomobject]@{Execute='cmd.exe';Arguments='bad';WorkingDirectory=$root})}
 $rejected=$false

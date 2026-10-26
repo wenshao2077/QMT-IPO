@@ -27,7 +27,9 @@ function New-IpoTaskDefinitions {
             $final=New-ScheduledTaskTrigger -Daily -At $StartDay.Date.AddHours(15).AddMinutes(5)
             $final.StartBoundary=$StartDay.ToString('yyyy-MM-dd')+'T15:05:00+08:00'
             $triggers+=$final
-            $triggers+=(New-ScheduledTaskTrigger -AtLogOn -User $User)
+            $logon=New-ScheduledTaskTrigger -AtLogOn -User $User
+            $logon.StartBoundary=$StartDay.ToString('yyyy-MM-dd')+'T00:00:00+08:00'
+            $triggers+=$logon
         }
         $action=New-ScheduledTaskAction -Execute (Join-Path $Root '.venv/Scripts/pythonw.exe') -Argument (Get-IpoArguments $Root $spec.Action) -WorkingDirectory $Root
         $name=$prefix+'-'+($spec.Name -split '-')[-1]

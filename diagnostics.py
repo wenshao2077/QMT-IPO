@@ -34,10 +34,12 @@ def configuration_report(config, check_environment=True):
             binding = binding_report(config['qmt_userdata'])
     except (ValueError, TypeError):
         issues.append('mini_qmt_userdata_missing')
-    try:
-        wecom_sender(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip())
-    except (OSError, ValueError):
-        issues.append('webhook_missing_or_invalid')
+    delivery=config.get('notification_mode','enabled')
+    if delivery == 'enabled':
+        try:
+            wecom_sender(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip())
+        except (OSError, ValueError):
+            issues.append('webhook_missing_or_invalid')
     ledger = Path(config['state_dir'])/'state.sqlite3'
     if not ledger.is_file():
         issues.append('ledger_missing_do_not_reinitialize_on_upgrade')
@@ -61,7 +63,8 @@ def configuration_report(config, check_environment=True):
     return {'ok': not issues, 'issues': issues, 'execution_enabled': config['enable_execution'],
             'client_binding': binding,
             'level': 'local_configuration_only', 'environment': environment,
-            'webhook': '已配置（密钥不显示）' if 'webhook_missing_or_invalid' not in issues else '未就绪',
+            'notification_delivery':delivery,
+            'webhook': '地址待提供；通知只落盘，暂不发送' if delivery == 'pending_address' else '已配置（密钥不显示）' if 'webhook_missing_or_invalid' not in issues else '未就绪',
             'calendar': calendar.to_dict(),
             'calendar_coverage': coverage_report(config),
             'message_sent': False, 'account_connected': False,
@@ -72,6 +75,8 @@ def configuration_report(config, check_environment=True):
 def test_notification(config, confirmed=False, sender_factory=wecom_sender):
     if not confirmed:
         raise ValueError('Notification test requires an explicit user send confirmation')
+    if config.get('notification_mode','enabled') != 'enabled':
+        raise ValueError('notification_destination_pending')
     sender = sender_factory(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip())
     sender('【QMT打新】用户主动点击的通知测试；未连接交易账户、未提交申购。')
     return {'ok': True, 'status': 'notification_test_sent', 'submission_calls': 0}

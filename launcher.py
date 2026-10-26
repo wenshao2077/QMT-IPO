@@ -6,7 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from runtime import atomic_json, read_json, single_instance
+from runtime import atomic_json, read_json, single_instance, execution_due
+from support import china_now
 
 ACTIONS = ('cycle', 'notify', 'monitor', 'backup')
 
@@ -33,6 +34,8 @@ def run(root, action, runner=subprocess.run):
             return {'status': 'maintenance_skip', 'exit_code': 0}
         if action == 'cycle' and config.get('enable_execution') is not True:
             return {'status': 'not_activated', 'exit_code': 0}
+        if action == 'cycle' and not execution_due(config,china_now().date().isoformat()):
+            return {'status': 'waiting_activation', 'exit_code': 0}
         start = datetime.now(timezone.utc)
         try:
             result = runner(command(root, action), cwd=root, timeout=180,

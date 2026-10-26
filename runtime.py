@@ -61,6 +61,13 @@ def validate_config_shape(config):
     from instance_identity import task_prefix, display_label
     task_prefix(config)
     display_label(config)
+    if config.get('notification_mode', 'enabled') not in ('enabled', 'pending_address'):
+        raise ValueError('Unknown notification delivery mode')
+    if 'execution_start_date' in config:
+        from datetime import date
+        value=config['execution_start_date']
+        if not isinstance(value,str) or date.fromisoformat(value).isoformat()!=value:
+            raise ValueError('Execution start date must be an explicit ISO date')
     if config.get('transport', 'xtquant') not in ('xtquant', 'native'):
         raise ValueError('Unknown broker transport')
     if config.get('transport') == 'native':
@@ -101,3 +108,7 @@ def validate_config(config):
     if (Path(config['control_dir'])/'configuration-pending.json').exists():
         raise ValueError('Configuration write interrupted; reviewed recovery required')
     return config
+
+
+def execution_due(config, day):
+    return not config.get('execution_start_date') or day >= config['execution_start_date']

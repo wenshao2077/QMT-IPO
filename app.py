@@ -15,7 +15,7 @@ import uuid
 
 from broker_factory import Broker, ReadOnlyBroker
 from coordinator import Coordinator, Ledger, DONE
-from runtime import atomic_json, backup, read_json, single_instance, validate_config
+from runtime import atomic_json, backup, read_json, single_instance, validate_config, execution_due
 from support import Store, china_now, wecom_sender
 from market_calendar import CalendarService, CLOSED, UNKNOWN, ensure_calendar
 from notification_policy import enqueue_calendar_issue, notification_stats, suppress_closed_alerts
@@ -48,6 +48,9 @@ def inspect_health(config,now=None):
         info['issues'].append('audit_archive_capacity')
     if not active:
         return info|{'status':'attention' if info['issues'] else 'not_activated'}
+    if not execution_due(config,info['day']):
+        return info|{'status':'attention' if info['issues'] else 'waiting_activation',
+                    'execution_start_date':config['execution_start_date']}
     if decision.status==CLOSED:
         return info|{'status':'attention' if info['issues'] else 'market_closed'}
     if decision.status==UNKNOWN:
@@ -137,9 +140,10 @@ def watch(config,send=False,now=None):
             store.event(f'monitor:{now.date()}:{last}:{bool(issues)}',('【'+label+'】' if label else '')+f'{now:%Y-%m-%d %H:%M}\n{text}')
         suppress_closed_alerts(store,config)
         # Closed/unknown days do not discard real result notifications.
-        if send and store.pending_notifications():
+        if send and config.get('notification_mode','enabled') == 'enabled' and store.pending_notifications():
             store.drain(wecom_sender(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip()))
         snapshot['pending_monitor_notifications']=store.pending_notifications()
+        snapshot['notification_delivery']=config.get('notification_mode','enabled')
     finally: store.close()
     atomic_json(root/'health.json',snapshot)
     return snapshot
@@ -199,10 +203,11 @@ def dispatch(action,config,live=False,send=False,broker_factory=None,now=china_n
                         receipt['activity']=getattr(coordinator,'activity',{})
                     elif action!='notify':
                         raise ValueError('Unknown action')
-                    if send and store.pending_notifications():
+                    if send and config.get('notification_mode','enabled') == 'enabled' and store.pending_notifications():
                         pending=store.drain(wecom_sender(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip()))
                     else: pending=store.pending_notifications()
-                    result=dict(result,pending_notifications=pending,suppressed_this_run=suppressed)
+                    result=dict(result,pending_notifications=pending,suppressed_this_run=suppressed,
+                                notification_delivery=config.get('notification_mode','enabled'))
                 finally: store.close()
             receipt.update(status='finished',finished_at=now().isoformat(),result=result)
         except Exception as exc:
@@ -226,7 +231,7 @@ def main(argv=None):
         if result.get('status')=='failed': return 1
         detail=result.get('result',result)
         if detail.get('phase') in ('pending','retryable_error','final_attention','calendar_unknown'): return 2
-        if detail.get('pending_notifications',0): return 3
+        if detail.get('pending_notifications',0) and detail.get('notification_delivery','enabled') != 'pending_address': return 3
         return 0
     except Exception as exc:
         print(json.dumps({'status':'startup_failed','error_type':type(exc).__name__}))

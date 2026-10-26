@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import time
 
-from runtime import atomic_json, read_json
+from runtime import atomic_json, read_json, execution_due
 from support import Store, build_plan, positive_int
 from market_calendar import CalendarService, CLOSED, UNKNOWN
 from notification_policy import enqueue_calendar_issue
@@ -189,6 +189,11 @@ class Coordinator:
             self.note('非交易日，已跳过' if decision.status==CLOSED else '日历未知，禁止提交')
             if decision.status==UNKNOWN:
                 enqueue_calendar_issue(self.config,decision)
+            return self.save()
+        if not execution_due(self.config,self.day):
+            self.activity['outcome']='waiting_activation'
+            self.doc.update(phase='waiting_activation',completed=False,
+                            next_due=self.config['execution_start_date']+'T09:35:00+08:00')
             return self.save()
         if t<T(9,35):
             self.activity['outcome']='waiting_open'

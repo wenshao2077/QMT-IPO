@@ -42,6 +42,16 @@ def _submit_window(stamp):
     return (9,35,0,0) <= clock < (11,30,0,0) or (13,0,0,0) <= clock <= (14,50,0,0)
 
 
+def _activation_due(config, stamp):
+    value=config.get('execution_start_date')
+    if value is None:
+        return True
+    parsed=datetime.strptime(value,'%Y-%m-%d').date().isoformat()
+    if parsed!=value:
+        raise ValueError('native_activation_date_invalid')
+    return stamp.date().isoformat()>=value
+
+
 def _calendar_open(root, permit, now):
     """Independent reviewed annual gate, without importing the 3.11 calendar module."""
     day = now.date().isoformat()
@@ -199,7 +209,8 @@ class NativeService:
         authorization = _read(os.path.join(from_native['control_dir'], 'panel-authorization.json'))
         if (from_native.get('enable_execution') is not True or from_native.get('transport') != 'native'
                 or authorization.get('authorized') is not True
-                or authorization.get('scope') != 'daily_stock_and_bond_ipo'):
+                or authorization.get('scope') != 'daily_stock_and_bond_ipo'
+                or not _activation_due(from_native,self.now())):
             raise ValueError('native_submission_disabled')
         # The same calendar contract is compiled into a per-day permit by the
         # Python 3.11 client. It is bound to this request, code and broker day.
@@ -267,7 +278,7 @@ class NativeService:
         final = self.now()
         if not request['created'] <= final.timestamp() <= request['expires']:
             raise ValueError('native_request_expired')
-        if final.date().isoformat() != day or not _submit_window(final):
+        if final.date().isoformat() != day or not _submit_window(final) or not _activation_due(latest,final):
             raise ValueError('native_outside_submit_window')
         # EXACTLY one signature, once. Even TypeError/None/timeout is uncertain.
         self.api['passorder'](23, 1101, self.account, code, 11, price, quantity,
