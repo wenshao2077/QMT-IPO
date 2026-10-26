@@ -89,7 +89,8 @@ class CalendarDeliveryTests(unittest.TestCase):
         self.assertEqual(result['last_activity']['outcome'],'connection_error')
         self.assertEqual(self.broker.connected,1)
         self.assertEqual(self.store.pending_notifications(),1)
-        self.assertIn('daily_work_incomplete',inspect_health(self.cfg,self.clock)['issues'])
+        self.assertIn('qmt_connection_failed',inspect_health(self.cfg,self.clock)['issues'])
+        self.assertNotIn('daily_work_incomplete',inspect_health(self.cfg,self.clock)['issues'])
 
     def test_missing_calendar_unknown_not_weekday_permission(self):
         service = self.no_bundle()

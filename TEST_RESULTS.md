@@ -1,5 +1,15 @@
 # 3.4.0 当前验证记录
 
+## 2026-10-26 连接、委托解析与监控兼容
+
+Windows x64、隔离 uv Python 3.11.15 / SQLite 3.50.4：13 组回归共 **298 项通过，0 失败、0 错误、0 跳过**。新增 21 项兼容测试覆盖两个显式 IPC 目录、连接/订阅返回码、51 条委托中 16 条备注 getter 解码失败、核心字段失败阻断、同证券防重、已有/缺失委托号意图、暂停重绑保存原账本与其他配置、未完成安装阻断、监控暂存，以及真实 PowerShell 子进程的空 JSON/数组/字符串布尔/非零退出等反例。仅假账户、假 SDK，不调用真实申购或发送真实消息。
+
+PS7 与系统 Windows PowerShell 5.1 的四个禁用任务定义、时区、归属及 16 份脚本语法检查均通过；未注册或触发任务。实际外部监控候选从现场副本暂存，保留原哈希，3 份生成脚本语法通过。
+
+初轮发现旧 INTENT 展示兼容问题，已恢复原状态；更新了有意改变的连接告警和重绑操作白名单预期。独立只读审查发现的安装接续、路径解析及监控健康宽松判断边界，均已修复并加入反例测试。
+
+命令：`uv run --no-project --python 3.11 python -B -m unittest -q test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card test_client_compat`；PS7/PS5.1 分别运行 `test_tasks.ps1`。最终源码 ZIP 解压重测和小黑只读候选结果绑定包外验收回执；这里不提前宣称生产部署或券商受理完成。
+
 ## 2026-10-20 图片通知
 
 Windows x64、隔离 uv Python 3.11.15：`python -B -m unittest discover -q` 共277项通过（含9项新增通知回归），0失败、0错误、0跳过。实际系统PowerShell/System.Drawing生成中文PNG已目视核验；测试发送使用假HTTP端点，不连接券商、不发送真实消息。成品ZIP复测与目标机部署另据包外回执。

@@ -9,6 +9,7 @@ from calendar_health import coverage_report
 from market_calendar import CalendarService, UNKNOWN
 from runtime import read_json, validate_config
 from support import china_now, wecom_sender
+from client_binding import binding_report
 
 
 def configuration_report(config, check_environment=True):
@@ -22,8 +23,10 @@ def configuration_report(config, check_environment=True):
         return {'ok': False, 'issues': ['configuration_structure_or_paths'], 'message_sent': False}
     if config['account_id'].strip() in ('YOUR_ACCOUNT', 'CHANGE_ME'):
         issues.append('account_not_configured')
-    qmt = Path(config['qmt_userdata'])
-    if not qmt.is_dir() or qmt.name.lower() != 'userdata_mini':
+    binding = None
+    try:
+        binding = binding_report(config['qmt_userdata'])
+    except (ValueError, TypeError):
         issues.append('mini_qmt_userdata_missing')
     try:
         wecom_sender(Path(config['webhook_file']).read_text(encoding='utf-8-sig').strip())
@@ -50,6 +53,7 @@ def configuration_report(config, check_environment=True):
     if calendar.status == UNKNOWN:
         issues.append('calendar_unknown')
     return {'ok': not issues, 'issues': issues, 'execution_enabled': config['enable_execution'],
+            'client_binding': binding,
             'level': 'local_configuration_only', 'environment': environment,
             'webhook': '已配置（密钥不显示）' if 'webhook_missing_or_invalid' not in issues else '未就绪',
             'calendar': calendar.to_dict(),

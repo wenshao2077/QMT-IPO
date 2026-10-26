@@ -6,6 +6,7 @@ import zipfile
 
 ACTION_NAMES={'cycle':'自动申购','notify':'通知补发','monitor':'运行监控','backup':'账本备份'}
 ISSUES={'daily_work_incomplete':'当日有未完成项目','daily_run_missing':'当日任务漏跑',
+        'qmt_connection_failed':'QMT连接或订阅失败，尚未完成项目查询','qmt_query_failed':'券商查询核验失败',
         'cycle_stuck':'运行超时','calendar_unavailable':'日历不可用','closeout_failed':'收盘核对未完成',
         'daily_record_missing':'运行记录缺失','notification_backlog':'通知积压','ledger_unavailable':'账本不可读'}
 
@@ -70,6 +71,11 @@ def make_row(path,record):
     if result.get('calendar'):
         cal=result['calendar'];lines.append(f"日历：{cal.get('status')} / {cal.get('source')} / {cal.get('covered_from')} 至 {cal.get('covered_through')}")
     if result.get('next_due'):lines.append('下一步时间：'+result['next_due'])
+    if activity.get('error_stage'):lines.append('失败阶段：'+activity['error_stage'])
+    if activity.get('error_detail'):lines.append('诊断：'+activity['error_detail'])
+    if activity.get('diagnostic'):lines.append('字段诊断：'+json.dumps(activity['diagnostic'],ensure_ascii=False))
+    if activity.get('connection'):lines.append('连接诊断：'+json.dumps(activity['connection'],ensure_ascii=False))
+    if activity.get('order_diagnostics'):lines.append('委托解析：'+json.dumps(activity['order_diagnostics'],ensure_ascii=False))
     for step in activity.get('steps',[]):lines.append(step.get('at','')+'  '+step.get('step',''))
     for code,item in sorted(result.get('items',{}).items()):
         lines.append(f"{code} {item.get('name','')}：{item.get('status','未知')}，{item_reason(code,item)}")

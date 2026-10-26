@@ -15,6 +15,7 @@ import uuid
 
 from runtime import atomic_json, read_json, single_instance, validate_config
 from support import wecom_sender
+from client_binding import validate_userdata
 
 TASK_NAMES = ('QmtIPO3-Cycle', 'QmtIPO3-Notify', 'QmtIPO3-Monitor', 'QmtIPO3-Backup')
 
@@ -138,9 +139,10 @@ def save_first_use(root, *, account_id, qmt_userdata, allowed_markets, webhook=N
         raise ConfigurationError('account_required')
     if any(c in account_id for c in ('\r', '\n', '\x00')):
         raise ConfigurationError('account_invalid')
-    qmt = Path(qmt_userdata)
-    if not qmt.is_absolute() or not qmt.is_dir() or qmt.name.lower() != 'userdata_mini':
-        raise ConfigurationError('mini_qmt_userdata_missing')
+    try:
+        qmt = validate_userdata(qmt_userdata)
+    except (ValueError, TypeError):
+        raise ConfigurationError('mini_qmt_userdata_missing') from None
     candidate.update(account_id=account_id.strip(), qmt_userdata=str(qmt.resolve()),
                      allowed_markets=list(allowed_markets), enable_execution=False)
     try:

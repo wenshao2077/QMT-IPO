@@ -24,10 +24,10 @@ jobs:
         run: python -B -c "from package_verify import verify_directory; verify_directory('.')"
       - name: Linux isolated business and GUI tests
         if: runner.os == 'Linux'
-        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card
+        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card test_client_compat
       - name: Windows isolated business and GUI tests
         if: runner.os == 'Windows'
-        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card
+        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card test_client_compat
       - name: Windows definitions and PowerShell parser only
         if: runner.os == 'Windows'
         shell: powershell
@@ -42,11 +42,11 @@ jobs:
       - name: Linux final ZIP regression
         if: runner.os == 'Linux'
         working-directory: ${{ runner.temp }}/qmt-ipo-unpacked/QMT-IPO-3.4.0-source
-        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card
+        run: xvfb-run -a python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card test_client_compat
       - name: Windows final ZIP regression
         if: runner.os == 'Windows'
         working-directory: ${{ runner.temp }}/qmt-ipo-unpacked/QMT-IPO-3.4.0-source
-        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card
+        run: python -B -m unittest -v test_system test_panel test_run_history test_calendar_delivery test_delivery_round1 test_discovery_round1 test_release_round1 test_maintenance_round2 test_package_round2 test_ui_round2 test_final_delivery test_notification_card test_client_compat
       - name: Windows final ZIP PowerShell parser checks
         if: runner.os == 'Windows'
         shell: powershell

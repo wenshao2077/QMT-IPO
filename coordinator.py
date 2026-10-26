@@ -85,6 +85,7 @@ class Coordinator:
 
     def orders(self):
         rows=self.broker.orders()
+        self.activity['order_diagnostics']=getattr(self.broker,'order_diagnostics',{})
         if not isinstance(rows,list):
             raise RuntimeError('委托查询没有返回完整列表')
         for row in rows:
@@ -103,7 +104,10 @@ class Coordinator:
                 matches=[o for o in matches if o.get('order_id')==row['order_id']]
             else:
                 expected=f"IPOv2_{self.day.replace('-','')}_{code}"
-                matches=[o for o in matches if o.get('remark')==expected]
+                if any(o.get('remark_state','readable') != 'readable' for o in matches):
+                    matches=[]
+                else:
+                    matches=[o for o in matches if o.get('remark')==expected]
             if len(matches)==1:
                 order=matches[0]
                 state=STATUS_MAP.get(order.get('status'),'PENDING')
@@ -111,7 +115,8 @@ class Coordinator:
                 item.update(status=state,order_id=order.get('order_id'),reason='券商委托查询')
                 item['broker_status_code']=order.get('raw_status')
             else:
-                item.update(status=row['state'],order_id=row['order_id'],reason='已有请求，当前未能唯一核对；不重发')
+                state='UNCERTAIN' if row['state'] in ACCEPTED else row['state']
+                item.update(status=state,order_id=row['order_id'],reason='已有请求，当前未能唯一核对；不重发')
         for error in self.broker.drain_errors():
             for code,item in self.doc['items'].items():
                 if ((item.get('order_id') and item['order_id']==error.get('id'))
@@ -199,6 +204,7 @@ class Coordinator:
         try:
             self.note('开始连接QMT')
             self.broker.connect()
+            self.activity['connection']=getattr(self.broker,'connection_info',{})
             connected=True
             stage='检查账户状态'
             self.broker.ready()
@@ -314,7 +320,11 @@ class Coordinator:
         except Exception as exc:
             self.activity['outcome']='query_error' if connected else 'connection_error'
             self.activity['error_code']='qmt_query_failed' if connected else 'qmt_connection_failed'
+            stage=getattr(exc,'stage',stage)
             self.activity['error_stage']=stage
+            self.activity['connection']=getattr(self.broker,'connection_info',{})
+            if hasattr(exc,'diagnostic'):
+                self.activity['diagnostic']=exc.diagnostic
             self.activity['error_type']=type(exc).__name__
             self.activity['error_detail']=redact(str(exc),self.config)[:400]
             self.doc.update(completed=False,phase='final_attention' if t>T(14,50) else 'retryable_error')

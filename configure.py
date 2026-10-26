@@ -10,7 +10,7 @@ from runtime import read_json
 MESSAGES = {
     'account_required': '请在本机填写资金账号。',
     'account_invalid': '账号包含不支持的控制字符。',
-    'mini_qmt_userdata_missing': '请选择现有 miniQMT 的 userdata_mini 文件夹。',
+    'mini_qmt_userdata_missing': '请选择已登录客户端实际使用的 userdata_mini 或 userdata 文件夹。',
     'webhook_missing_or_invalid': '请在本机填写有效的企业微信机器人 Webhook；不会发送测试消息。',
     'configuration_invalid': '配置无效；至少选择一个市场，运行目录不能放在 QMT 数据目录内。',
     'used_installation_requires_reviewed_account_change': '此安装已有授权或运行历史。首次配置向导不会更换生产账户，请按维护流程处理。',
@@ -38,7 +38,7 @@ class ConfigurationWizard:
         self.hook = tk.StringVar(value='')  # Never prefill or reveal the existing secret.
         ttk.Label(frame, text='资金账号').grid(row=1, column=0, sticky='w', pady=8)
         ttk.Entry(frame, textvariable=self.account, show='*').grid(row=1, column=1, columnspan=2, sticky='ew')
-        ttk.Label(frame, text='miniQMT 数据目录').grid(row=2, column=0, sticky='w', pady=8)
+        ttk.Label(frame, text='QMT 接口目录').grid(row=2, column=0, sticky='w', pady=8)
         ttk.Entry(frame, textvariable=self.qmt).grid(row=2, column=1, sticky='ew')
         ttk.Button(frame, text='选择目录', command=self.choose_directory).grid(row=2, column=2, padx=(8, 0))
         ttk.Label(frame, text='申购范围').grid(row=3, column=0, sticky='w', pady=8)
@@ -61,7 +61,7 @@ class ConfigurationWizard:
         self.save_button.pack(side='left')
 
     def choose_directory(self):
-        value = filedialog.askdirectory(parent=self.window, title='选择 userdata_mini 文件夹')
+        value = filedialog.askdirectory(parent=self.window, title='选择实际接口的 userdata_mini 或 userdata 文件夹')
         if value:
             self.qmt.set(value)
 

@@ -3,6 +3,14 @@
   "entry": "setup.ps1",
   "version": "3.4.0",
   "operations": {
+    "RebindClient": {
+      "mutates": "only_qmt_userdata_in_existing_paused_config",
+      "needs_root": true,
+      "requires": ["QmtUserdata", "ConfirmRebind", "execution_disabled", "all_four_tasks_disabled"],
+      "account_connection": false,
+      "submission_calls": 0,
+      "preserves_account_ledger_and_disabled_switches": true
+    },
     "VerifyPackage": {
       "mutates": false,
       "needs_root": false,

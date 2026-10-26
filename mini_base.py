@@ -1,4 +1,4 @@
-"""Thin miniQMT adapter; SDK is imported only on explicit connection.
+"""Thin XtQuant adapter; SDK is imported only on explicit connection.
 
 No QMT/QuantClass process start, stop, restart or ledger modification.
 close() stops only this process's XtQuantTrader connection.
@@ -9,17 +9,19 @@ from pathlib import Path
 import time
 
 from support import CHINA, positive_int
+from client_binding import validate_userdata, binding_report, BrokerDiagnosticError
 
 
 class MiniBroker:
     def __init__(self, config):
         self.config = config
         self.trader = None
+        self.connection_info = {}
+        self.order_diagnostics = {'row_count': 0, 'remark_unavailable_count': 0}
 
     def connect(self):
-        root = Path(self.config['qmt_userdata'])
-        if not root.is_absolute() or not root.is_dir() or root.name.lower() != 'userdata_mini':
-            raise ValueError('请核对 miniQMT 的绝对 userdata_mini 路径')
+        root = validate_userdata(self.config['qmt_userdata'])
+        self.connection_info = binding_report(root)
         account_id = self.config['account_id']
         if not isinstance(account_id, str) or not account_id.strip():
             raise ValueError('资金账号未配置')
@@ -31,10 +33,14 @@ class MiniBroker:
         session = (time.time_ns() ^ (os.getpid() << 16)) % 2147483646 + 1
         self.trader = XtQuantTrader(str(root), session)
         self.trader.start()
-        if self.trader.connect() != 0:
-            raise RuntimeError('miniQMT连接失败')
-        if self.trader.subscribe(self.account) != 0:
-            raise RuntimeError('miniQMT账户订阅失败')
+        rc = self.trader.connect()
+        self.connection_info['connect_rc'] = rc
+        if rc != 0:
+            raise BrokerDiagnosticError('qmt_connect_failed', '连接QMT', return_code=rc)
+        rc = self.trader.subscribe(self.account)
+        self.connection_info['subscribe_rc'] = rc
+        if rc != 0:
+            raise BrokerDiagnosticError('qmt_subscribe_failed', '订阅账户', return_code=rc)
 
     def close(self):
         if self.trader is not None:
@@ -71,22 +77,41 @@ class MiniBroker:
         # Confirmation is acceptance, not a fill or an IPO allotment.
         statuses[86] = 'confirmed'
         orders = []
-        for order in raw:
+        self.order_diagnostics = {'row_count': len(raw), 'remark_unavailable_count': 0}
+        for index, order in enumerate(raw):
+            values = {}
+            for field in ('account_id', 'order_time', 'stock_code', 'order_id', 'order_status'):
+                try:
+                    values[field] = getattr(order, field)
+                except Exception as exc:
+                    raise BrokerDiagnosticError('qmt_order_field_unreadable', '查询并核对券商委托',
+                                                row_index=index, field=field) from exc
             # Scope to requested account even if broker unexpectedly returns mixed data.
-            if getattr(order, 'account_id', None) != self.config['account_id']:
+            if values['account_id'] != self.config['account_id']:
                 raise RuntimeError('委托查询账户不一致')
-            stamp = positive_int(order.order_time, '委托时间')
+            stamp = positive_int(values['order_time'], '委托时间')
             if not 1_000_000_000 <= stamp < 10_000_000_000:
                 raise RuntimeError('委托时间不是预期的秒级时间戳')
+            if not isinstance(values['stock_code'], str) or not isinstance(values['order_status'], int) or isinstance(values['order_status'], bool):
+                raise BrokerDiagnosticError('qmt_order_field_invalid', '查询并核对券商委托', row_index=index)
+            try:
+                remark = getattr(order, 'order_remark', None)
+                remark_state = 'readable' if isinstance(remark, str) else 'missing'
+            except UnicodeError:
+                remark, remark_state = None, 'decode_failed'
+            if remark_state != 'readable':
+                remark = None
+                self.order_diagnostics['remark_unavailable_count'] += 1
             orders.append({
-                'code': order.stock_code,
+                'code': values['stock_code'],
                 'day': datetime.fromtimestamp(stamp, CHINA).date().isoformat(),
                 # Broker-originated orders can lack a local SDK id. Keep them
                 # in reconciliation/deduplication; submit() still requires > 0.
-                'order_id': positive_int(order.order_id, '委托号', allow_zero=True),
-                'status': statuses.get(order.order_status, 'pending'),
-                'raw_status': order.order_status,
-                'remark': getattr(order, 'order_remark', ''),
+                'order_id': positive_int(values['order_id'], '委托号', allow_zero=True),
+                'status': statuses.get(values['order_status'], 'pending'),
+                'raw_status': values['order_status'],
+                'remark': remark,
+                'remark_state': remark_state,
             })
         return orders
 

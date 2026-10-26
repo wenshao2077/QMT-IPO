@@ -356,7 +356,12 @@ class DeliveryRoundOneTests(unittest.TestCase):
     def test_protocol_has_no_secret_or_execution_operations(self):
         protocol=read_json(SOURCE/'DEPLOY_PROTOCOL.json')
         self.assertEqual(set(protocol['operations']),{'Plan','Doctor','VerifyPackage','New','ResumeNew','Configure','Upgrade','Rollback',
-                                                    'Health','RecoveryPlan','ExportSupport','CalendarCoverage','VerifyArchive'})
+                                                    'Health','RecoveryPlan','ExportSupport','CalendarCoverage','VerifyArchive','RebindClient'})
+        binding=protocol['operations']['RebindClient']
+        self.assertFalse(binding['account_connection'])
+        self.assertEqual(binding['submission_calls'],0)
+        self.assertIn('execution_disabled',binding['requires'])
+        self.assertIn('all_four_tasks_disabled',binding['requires'])
         self.assertIn('reinitialize_ledger',protocol['forbidden_automatic_actions'])
         entry=(SOURCE/'setup.ps1').read_text(encoding='utf-8-sig')
         self.assertIn('install.ps1',entry);self.assertIn('deploy.py',entry)

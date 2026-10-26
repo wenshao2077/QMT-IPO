@@ -18,7 +18,8 @@
     },
     "qmt_userdata": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "description": "Explicit existing userdata_mini or userdata IPC directory; UI edition never selects or switches it automatically."
     },
     "state_dir": {
       "type": "string",

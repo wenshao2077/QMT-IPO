@@ -1,13 +1,15 @@
 # Customer/AI entry; always verify the complete extracted package first.
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu','VerifyPackage','Plan','New','ResumeNew','Doctor','Configure','Upgrade','Rollback','Health','RecoveryPlan','ExportSupport','CalendarCoverage','OpenConsole')][string]$Operation='Menu',
+    [ValidateSet('Menu','VerifyPackage','Plan','New','ResumeNew','Doctor','Configure','Upgrade','Rollback','Health','RecoveryPlan','ExportSupport','CalendarCoverage','OpenConsole','RebindClient')][string]$Operation='Menu',
     [string]$Root,
     [string]$RollbackId,
     [string]$Output,
     [switch]$ConfirmExport,
     [switch]$ConfirmMaintenance,
-    [switch]$Interactive
+    [switch]$Interactive,
+    [string]$QmtUserdata,
+    [switch]$ConfirmRebind
 )
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=[Text.Encoding]::UTF8
@@ -53,6 +55,8 @@ try{
         if(($ConfirmExport -or $Output) -and $Operation -ne 'ExportSupport'){throw 'export_arguments_not_applicable'}
         if($RollbackId -and $Operation -ne 'Rollback'){throw 'rollback_id_not_applicable'}
         if($Operation -eq 'Rollback' -and -not $RollbackId){throw 'rollback_id_required'}
+        if($Operation -eq 'RebindClient' -and (-not $QmtUserdata -or -not $ConfirmRebind)){throw 'explicit_rebind_arguments_required'}
+        if(($QmtUserdata -or $ConfirmRebind) -and $Operation -ne 'RebindClient'){throw 'rebind_arguments_not_applicable'}
         $python=Join-Path $package 'runtime/python/python.exe'
         if($Operation -in @('New','ResumeNew')){
             if($Operation -eq 'New' -and (Test-Path -LiteralPath $Root) -and @([IO.Directory]::EnumerateFileSystemEntries($Root)).Count){throw 'new_install_requires_empty_root'}
@@ -75,6 +79,7 @@ try{
             if($Operation -in @('New','ResumeNew')){$a+=@('-InstallDependencies','-Wheelhouse',(Join-Path $package 'packages/wheels'))}
             if($RollbackId){$a+=@('-RollbackId',$RollbackId)}
             if($Operation -eq 'ExportSupport'){$a+=@('-Output',$Output,'-ConfirmExport')}
+            if($Operation -eq 'RebindClient'){$a+=@('-QmtUserdata',$QmtUserdata,'-ConfirmRebind')}
             $text=& $ps @a
             $rc=$LASTEXITCODE
             $result=($text -join "`n")|ConvertFrom-Json

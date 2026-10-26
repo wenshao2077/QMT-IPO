@@ -77,7 +77,12 @@ def inspect_health(config,now=None):
             pending=sum(item.get('status') not in DONE for item in items.values())
             info['unfinished_items']=pending
             info['recorded_items']=len(items)
-            info['issues'].append('daily_verification_failed' if items and not pending and doc.get('errors') else 'daily_work_incomplete')
+            activity=doc.get('last_activity',{})
+            info['last_error']={key:activity[key] for key in ('error_stage','error_type','error_code') if key in activity}
+            if not items and activity.get('outcome') in ('connection_error','query_error'):
+                info['issues'].append('qmt_connection_failed' if activity['outcome']=='connection_error' else 'qmt_query_failed')
+            else:
+                info['issues'].append('daily_verification_failed' if items and not pending and doc.get('errors') else 'daily_work_incomplete')
         if not doc.get('completed') and now.strftime('%H:%M')>='15:10':
             info['issues'].append('closeout_failed')
     except (OSError,ValueError,KeyError,TypeError):
@@ -104,6 +109,8 @@ def watch(config,send=False,now=None):
     if snapshot['status'] in ('healthy','attention'):
         if issues and count>=2 and (issues!=before.get('last_alert_issues') or now.timestamp()-last>=1800):
             labels={'cycle_stuck':'任务长时间未结束','daily_run_missing':'今日定时任务漏跑',
+                    'qmt_connection_failed':'QMT连接或订阅失败，尚未完成申购项目查询',
+                    'qmt_query_failed':'券商查询核验失败，不能据此判断有无漏单',
                     'daily_work_incomplete':'今日仍有未完成项目','closeout_failed':'收盘核对未完成',
                     'daily_verification_failed':'已记录项目均已处理，但最新查询核验失败（不代表漏报）',
                     'daily_record_missing':'今日运行记录缺失','notification_backlog':'通知连续失败并积压',
