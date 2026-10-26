@@ -21,6 +21,7 @@ from support import china_now
 from market_calendar import CalendarService
 from notification_policy import notification_stats, combined_notification_stats
 from calendar_health import coverage_report
+from instance_identity import task_names
 
 TASK_NAMES=('QmtIPO3-Cycle','QmtIPO3-Notify','QmtIPO3-Monitor','QmtIPO3-Backup')
 PHASES={'complete':'截至本轮处理完成','no_ipo':'截至本轮未发现申购项目','no_eligible':'无范围内项目','pending':'部分项目待处理',
@@ -40,11 +41,12 @@ def plan_state(snapshot):
     if not snapshot or not snapshot.get('ok'):
         return 'unknown','状态暂不可用'
     tasks={r['name']:r for r in snapshot.get('tasks',[])}
-    if any(name not in tasks or not tasks[name].get('exists') for name in TASK_NAMES):
+    names=task_names({'task_prefix': snapshot.get('task_prefix', 'QmtIPO3')})
+    if any(name not in tasks or not tasks[name].get('exists') for name in names):
         return 'inconsistent','计划任务待修复'
-    cycle=tasks['QmtIPO3-Cycle']['enabled']
+    cycle=tasks[names[0]]['enabled']
     flag=snapshot.get('execution_enabled',False)
-    if flag and cycle and all(tasks[n]['enabled'] for n in TASK_NAMES):
+    if flag and cycle and all(tasks[n]['enabled'] for n in names):
         return 'enabled','每日自动打新已启用'
     if not flag and not cycle:
         return 'disabled','每日自动打新未启用'

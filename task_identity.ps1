@@ -1,4 +1,18 @@
 # No registration or execution. Exact entrypoint ownership for the four tasks.
+function Get-IpoTaskPrefix([string]$Root) {
+    $prefix='QmtIPO3'
+    $path=Join-Path $Root 'config.json'
+    if(Test-Path -LiteralPath $path){
+        $config=Get-Content -LiteralPath $path -Raw -Encoding UTF8|ConvertFrom-Json
+        if($null -ne $config.task_prefix){$prefix=[string]$config.task_prefix}
+    }
+    if($prefix -cnotmatch '^QmtIPO[A-Za-z0-9-]{0,40}$'){throw 'Invalid task namespace'}
+    return $prefix
+}
+function Get-IpoTaskSpecs([string]$Root) {
+    $prefix=Get-IpoTaskPrefix $Root
+    return @{ ($prefix+'-Cycle')='cycle'; ($prefix+'-Notify')='notify'; ($prefix+'-Monitor')='monitor'; ($prefix+'-Backup')='backup' }
+}
 function Convert-IpoPath([string]$Value) {
     return ([IO.Path]::GetFullPath($Value)).TrimEnd([char]92,[char]47).Replace([char]47,[char]92)
 }

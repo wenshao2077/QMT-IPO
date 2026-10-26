@@ -2,6 +2,11 @@
 from pathlib import Path
 
 
+class SubmissionReceipt:
+    """Native call observed once; no broker order ID or acceptance is asserted."""
+    pass
+
+
 def validate_userdata(value):
     path = Path(value)
     if not path.is_absolute() or not path.is_dir() or path.name.lower() not in ('userdata_mini', 'userdata'):

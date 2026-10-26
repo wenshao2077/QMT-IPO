@@ -13,7 +13,7 @@ import sqlite3
 import time
 import uuid
 
-from broker import Broker, ReadOnlyBroker
+from broker_factory import Broker, ReadOnlyBroker
 from coordinator import Coordinator, Ledger, DONE
 from runtime import atomic_json, backup, read_json, single_instance, validate_config
 from support import Store, china_now, wecom_sender
@@ -24,6 +24,7 @@ from calendar_health import coverage_report
 from notification_policy import combined_notification_stats
 
 from release_info import VERSION
+from instance_identity import display_label
 
 
 def inspect_health(config,now=None):
@@ -132,7 +133,8 @@ def watch(config,send=False,now=None):
                         'QMT打新：日历维护提醒\n首次未知日期：'+str(coverage['first_unknown_day'])+
                         '\n请核对并导入有来源的年度日历；不会猜测新年度，不会自动下载或启用交易。')
         if text:
-            store.event(f'monitor:{now.date()}:{last}:{bool(issues)}',f'{now:%Y-%m-%d %H:%M}\n{text}')
+            label=display_label(config)
+            store.event(f'monitor:{now.date()}:{last}:{bool(issues)}',('【'+label+'】' if label else '')+f'{now:%Y-%m-%d %H:%M}\n{text}')
         suppress_closed_alerts(store,config)
         # Closed/unknown days do not discard real result notifications.
         if send and store.pending_notifications():

@@ -26,6 +26,7 @@ from notification_policy import combined_notification_stats
 from release_info import VERSION
 from runtime import validate_config, validate_config_shape
 from support import CHINA, china_now
+from instance_identity import root_task_names
 
 MAX_JSON_BYTES = 256 * 1024
 TASKS = ('QmtIPO3-Cycle', 'QmtIPO3-Notify', 'QmtIPO3-Monitor', 'QmtIPO3-Backup')
@@ -132,12 +133,13 @@ def _task_summary(root, provider):
         from panel_backend import WindowsController
         provider = lambda r: WindowsController(r).call('Snapshot')
     try:
+        names = root_task_names(root)
         raw = provider(root)
         rows = raw.get('tasks', [])
-        if raw.get('ok') is not True or not isinstance(rows, list) or len(rows) != 4 or {r.get('name') for r in rows} != set(TASKS):
+        if raw.get('ok') is not True or not isinstance(rows, list) or len(rows) != 4 or {r.get('name') for r in rows} != set(names):
             raise MaintenanceError('task_state_unavailable')
         safe = []
-        for name in TASKS:
+        for name in names:
             row = next(r for r in rows if r['name'] == name)
             safe.append({'name': name, 'exists': row.get('exists') is True,
                          'enabled': row.get('enabled') if type(row.get('enabled')) is bool else None,

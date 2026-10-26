@@ -11,7 +11,7 @@ from configuration import control_mutex, require_disabled_tasks, _snapshot
 from runtime import atomic_json, read_json, single_instance, validate_config
 
 
-def rebind(root, userdata, *, confirmed=False, task_provider=_snapshot, mutex_factory=control_mutex):
+def rebind(root, userdata, *, confirmed=False, task_provider=_snapshot, mutex_factory=None, transport=None):
     if not confirmed:
         raise ValueError('explicit_rebind_confirmation_required')
     root = Path(root).resolve()
@@ -33,12 +33,14 @@ def rebind(root, userdata, *, confirmed=False, task_provider=_snapshot, mutex_fa
     if not ledger.is_file():
         raise ValueError('ledger_missing_do_not_reinitialize')
     candidate = dict(config, qmt_userdata=str(candidate_path))
+    if transport is not None:
+        candidate['transport'] = transport
     validate_config(candidate)
     with ExitStack() as stack:
-        stack.enter_context(mutex_factory())
+        stack.enter_context(mutex_factory() if mutex_factory else control_mutex(root))
         for path in (root/'install.lock', Path(config['state_dir'])/'instance.lock', Path(config['control_dir'])/'monitor.lock'):
             stack.enter_context(single_instance(path))
-        require_disabled_tasks(task_provider(root))
+        require_disabled_tasks(task_provider(root), config)
         require_installation_complete()
         if read_json(root/'config.json') != config or (root/'maintenance.json').exists():
             raise ValueError('configuration_changed_retry')
@@ -73,9 +75,10 @@ def main(argv=None):
     p.add_argument('--root', type=Path, required=True)
     p.add_argument('--qmt-userdata', type=Path, required=True)
     p.add_argument('--confirm-rebind', action='store_true')
+    p.add_argument('--transport', choices=['xtquant', 'native'])
     a = p.parse_args(argv)
     try:
-        result = rebind(a.root, a.qmt_userdata, confirmed=a.confirm_rebind)
+        result = rebind(a.root, a.qmt_userdata, confirmed=a.confirm_rebind, transport=a.transport)
     except Exception as exc:
         code = str(exc)
         result = {'ok': False, 'code': code if code.isascii() and code.replace('_', '').isalnum() else 'client_rebind_failed',

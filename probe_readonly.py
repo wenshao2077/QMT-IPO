@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import re
 
-from broker import ReadOnlyBroker
+from broker_factory import ReadOnlyBroker
 from market_calendar import CalendarService
 from privacy import redact
 from runtime import read_json, validate_config

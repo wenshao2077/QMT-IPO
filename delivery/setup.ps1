@@ -1,7 +1,7 @@
 # Customer/AI entry; always verify the complete extracted package first.
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu','VerifyPackage','Plan','New','ResumeNew','Doctor','Configure','Upgrade','Rollback','Health','RecoveryPlan','ExportSupport','CalendarCoverage','OpenConsole','RebindClient')][string]$Operation='Menu',
+    [ValidateSet('Menu','VerifyPackage','Plan','New','ResumeNew','Doctor','Configure','Upgrade','Rollback','Health','RecoveryPlan','ExportSupport','CalendarCoverage','OpenConsole','RebindClient','PrepareNative')][string]$Operation='Menu',
     [string]$Root,
     [string]$RollbackId,
     [string]$Output,
@@ -9,7 +9,10 @@ param(
     [switch]$ConfirmMaintenance,
     [switch]$Interactive,
     [string]$QmtUserdata,
-    [switch]$ConfirmRebind
+    [switch]$ConfirmRebind,
+    [string]$TaskPrefix,
+    [ValidateSet('xtquant','native')][string]$Transport,
+    [switch]$ConfirmPrepare
 )
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=[Text.Encoding]::UTF8
@@ -57,6 +60,10 @@ try{
         if($Operation -eq 'Rollback' -and -not $RollbackId){throw 'rollback_id_required'}
         if($Operation -eq 'RebindClient' -and (-not $QmtUserdata -or -not $ConfirmRebind)){throw 'explicit_rebind_arguments_required'}
         if(($QmtUserdata -or $ConfirmRebind) -and $Operation -ne 'RebindClient'){throw 'rebind_arguments_not_applicable'}
+        if($TaskPrefix -and $Operation -notin @('New','ResumeNew')){throw 'task_prefix_only_for_new'}
+        if($Transport -and $Operation -ne 'RebindClient'){throw 'transport_only_for_rebind'}
+        if($Operation -eq 'PrepareNative' -and -not $ConfirmPrepare){throw 'explicit_native_preparation_required'}
+        if($ConfirmPrepare -and $Operation -ne 'PrepareNative'){throw 'prepare_confirmation_not_applicable'}
         $python=Join-Path $package 'runtime/python/python.exe'
         if($Operation -in @('New','ResumeNew')){
             if($Operation -eq 'New' -and (Test-Path -LiteralPath $Root) -and @([IO.Directory]::EnumerateFileSystemEntries($Root)).Count){throw 'new_install_requires_empty_root'}
@@ -80,6 +87,9 @@ try{
             if($RollbackId){$a+=@('-RollbackId',$RollbackId)}
             if($Operation -eq 'ExportSupport'){$a+=@('-Output',$Output,'-ConfirmExport')}
             if($Operation -eq 'RebindClient'){$a+=@('-QmtUserdata',$QmtUserdata,'-ConfirmRebind')}
+            if($TaskPrefix){$a+=@('-TaskPrefix',$TaskPrefix)}
+            if($Transport){$a+=@('-Transport',$Transport)}
+            if($ConfirmPrepare){$a+='-ConfirmPrepare'}
             $text=& $ps @a
             $rc=$LASTEXITCODE
             $result=($text -join "`n")|ConvertFrom-Json

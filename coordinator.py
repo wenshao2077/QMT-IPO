@@ -16,6 +16,8 @@ from market_calendar import CalendarService, CLOSED, UNKNOWN
 from notification_policy import enqueue_calendar_issue
 from privacy import redact
 from discovery_policy import next_discovery_at
+from client_binding import SubmissionReceipt
+from instance_identity import display_label
 
 ACCEPTED={'REPORTED','SUCCEEDED','CONFIRMED'}
 PENDING={'INTENT','UNCERTAIN','SUBMITTED','PENDING','PARTIAL'}
@@ -48,7 +50,7 @@ class Coordinator:
         self.config,self.broker,self.ledger,self.now=config,broker,ledger,now
         self.calendar_decision=calendar_decision
         self.activity={'queried':False,'candidate_count':None,'submitted':0,'deferred':0,
-                       'scope_skipped':0,'outcome':'starting','steps':[]}
+                       'scope_skipped':0,'submission_results_unknown':0,'outcome':'starting','steps':[]}
         self.mode=mode
         if mode not in ('preview','live'):
             raise ValueError('Unknown mode')
@@ -80,8 +82,9 @@ class Coordinator:
             item.update(status='MISSED',reason='已超出本程序申报窗口，未提交')
 
     def message(self,key,text):
+        label=display_label(self.config)
         self.ledger.event(f'v3:{self.account}:{self.day}:{self.mode}:{key}',
-                          f'{self.day} 自动打新V3【'+('实盘' if self.mode=='live' else '预览、不下单')+'】\n'+text)
+                          ('【'+label+'】' if label else '')+f'{self.day} 自动打新V3【'+('实盘' if self.mode=='live' else '预览、不下单')+'】\n'+text)
 
     def orders(self):
         rows=self.broker.orders()
@@ -100,10 +103,12 @@ class Coordinator:
             code=row['code']
             item=self.doc['items'].setdefault(code,{'code':code,'name':code,'kind':'UNKNOWN','quantity':row['quantity']})
             matches=[o for o in orders if o['code']==code]
-            if row['order_id']:
+            native = self.config.get('transport') == 'native'
+            expected=f"IPOv2_{self.day.replace('-','')}_{code}"
+            if row['order_id'] and not native:
                 matches=[o for o in matches if o.get('order_id')==row['order_id']]
+                matches=[o for o in matches if not o.get('remark') or o.get('remark') == expected]
             else:
-                expected=f"IPOv2_{self.day.replace('-','')}_{code}"
                 if any(o.get('remark_state','readable') != 'readable' for o in matches):
                     matches=[]
                 else:
@@ -111,7 +116,7 @@ class Coordinator:
             if len(matches)==1:
                 order=matches[0]
                 state=STATUS_MAP.get(order.get('status'),'PENDING')
-                self.ledger.record(self.account,self.day,code,state,order.get('order_id'))
+                self.ledger.record(self.account,self.day,code,state,order.get('order_id') or row['order_id'])
                 item.update(status=state,order_id=order.get('order_id'),reason='券商委托查询')
                 item['broker_status_code']=order.get('raw_status')
             else:
@@ -129,6 +134,8 @@ class Coordinator:
             cards=result_cards(self.doc)
             if cards is not None:
                 for card in cards:
+                    label=display_label(self.config)
+                    if label:card['broker_label']=label
                     for item in card['items']:
                         item['name']=redact(item['name'],self.config)[:80]
                     # Normalized display identity: REPORTED -> CONFIRMED is not
@@ -292,8 +299,10 @@ class Coordinator:
                 item['status']='INTENT'
                 self.save()
                 try:
-                    order_id=positive_int(self.broker.submit(plan),'委托号')
+                    result=self.broker.submit(plan)
+                    order_id=None if isinstance(result,SubmissionReceipt) else positive_int(result,'委托号')
                 except Exception as exc:
+                    self.activity['submission_results_unknown']+=1
                     self.ledger.record(self.account,self.day,code,'UNCERTAIN')
                     item.update(status='UNCERTAIN',reason=type(exc).__name__)
                 else:
@@ -314,7 +323,7 @@ class Coordinator:
                 if self.doc['completed'] and all(i.get('status')=='SKIPPED_SCOPE' for i in self.doc['items'].values()):
                     self.doc['phase']='no_eligible'
                 self.activity['outcome']=self.doc['phase']
-            self.note('本轮完成：提交'+str(self.activity['submitted'])+'笔')
+            self.note('本轮完成：确认调用提交'+str(self.activity['submitted'])+'笔；另有'+str(self.activity['submission_results_unknown'])+'笔结果待核对')
             stage='生成结果通知'
             self.summary()
         except Exception as exc:
@@ -329,7 +338,9 @@ class Coordinator:
             self.activity['error_detail']=redact(str(exc),self.config)[:400]
             self.doc.update(completed=False,phase='final_attention' if t>T(14,50) else 'retryable_error')
             accepted=sum(i.get('status') in ACCEPTED|{'EXTERNAL_ACCEPTED'} for i in self.doc['items'].values())
-            self.doc['errors']=[f'{stage}未完成（{type(exc).__name__}）；此前已核对有效委托{accepted}项，本轮新增提交{self.activity["submitted"]}笔。已有请求不重发，详见运行记录。']
+            unknown=self.activity['submission_results_unknown']
+            extra=f'，另有{unknown}笔提交结果待核对' if unknown else ''
+            self.doc['errors']=[f'{stage}未完成（{type(exc).__name__}）；此前已核对有效委托{accepted}项，本轮新增提交{self.activity["submitted"]}笔{extra}。已有请求不重发，详见运行记录。']
             # One notification per error type / 30-minute bucket, not every poll.
             self.message(f'error:{type(exc).__name__}:{int(stamp.timestamp()//1800)}',self.doc['errors'][0])
         finally:

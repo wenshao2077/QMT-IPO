@@ -62,6 +62,8 @@ def make_row(path,record):
     query_text=(f"返回 {activity.get('candidate_count',0)} 条" if queried else '未查询') if queried is not None else ('未查询' if old_skipped else '未统计')
     submitted=activity.get('submitted',0 if old_skipped else None)
     count_text=query_text+' / '+(str(submitted)+'笔提交' if submitted is not None else '提交数未统计')
+    if activity.get('submission_results_unknown'):
+        count_text+=' / '+str(activity['submission_results_unknown'])+'笔结果待核对'
     if record.get('action')!='cycle':count_text='—'
     description=describe_run(record)
     lines=[f"任务：{ACTION_NAMES.get(record.get('action'),record.get('action','未知'))}",

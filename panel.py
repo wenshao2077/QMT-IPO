@@ -253,7 +253,7 @@ class Panel:
             self.feedback.configure(text=('首次控制需要Windows系统授权，程序会自动提示，不用手动以管理员运行。' if data.get('needs_admin') else '任务管理权限已就绪。所有控制操作都有结果回读和记录。'),fg=MUTED)
         doc=data.get('daily')
         self.cards['today'].configure(text=PHASES.get(doc.get('phase'),doc.get('phase')) if doc else ('非交易日，已跳过' if data.get('calendar',{}).get('status')=='market_closed' else '日历未知，禁止提交' if data.get('calendar',{}).get('status')=='unknown' else '尚未开始'))
-        cycle=next((t for t in data.get('tasks',[]) if t['name']=='QmtIPO3-Cycle'),{})
+        cycle=next((t for t in data.get('tasks',[]) if t['name'].endswith('-Cycle')),{})
         upcoming='待启用'
         if cycle.get('enabled') and cycle.get('next_run'):
             try:

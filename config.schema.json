@@ -12,6 +12,21 @@
     "enable_execution"
   ],
   "properties": {
+    "instance_label": {"type": "string", "maxLength": 16},
+    "task_prefix": {
+      "type": "string",
+      "pattern": "^QmtIPO[A-Za-z0-9-]{0,40}$",
+      "description": "Immutable task namespace for this installation; omitted legacy value is QmtIPO3."
+    },
+    "transport": {
+      "enum": ["xtquant", "native"],
+      "default": "xtquant",
+      "description": "Explicit route; no automatic fallback after failure."
+    },
+    "native_bridge_dir": {
+      "type": "string",
+      "description": "Dedicated installation/native spool; never shared with another broker or the order ledger."
+    },
     "account_id": {
       "type": "string",
       "minLength": 1

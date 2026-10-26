@@ -4,6 +4,7 @@ function New-IpoTaskDefinitions {
     param([Parameter(Mandatory=$true)][string]$Root,[Parameter(Mandatory=$true)][string]$User,
           [datetime]$StartDay=([TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([datetime]::UtcNow,'China Standard Time')).Date)
     $Root=Convert-IpoPath $Root
+    $prefix=Get-IpoTaskPrefix $Root
     $principal=New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
     $settings=New-ScheduledTaskSettingsSet -Disable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 4) -StartWhenAvailable -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     $specs=@(
@@ -29,6 +30,7 @@ function New-IpoTaskDefinitions {
             $triggers+=(New-ScheduledTaskTrigger -AtLogOn -User $User)
         }
         $action=New-ScheduledTaskAction -Execute (Join-Path $Root '.venv/Scripts/pythonw.exe') -Argument (Get-IpoArguments $Root $spec.Action) -WorkingDirectory $Root
-        [pscustomobject]@{Name=$spec.Name;Task=(New-ScheduledTask -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description 'QMT IPO: disabled until explicit user authorization; durable intent; no uncertain-order resubmission.')}
+        $name=$prefix+'-'+($spec.Name -split '-')[-1]
+        [pscustomobject]@{Name=$name;Task=(New-ScheduledTask -Action $action -Trigger $triggers -Settings $settings -Principal $principal -Description 'QMT IPO: disabled until explicit user authorization; durable intent; no uncertain-order resubmission.')}
     }
 }

@@ -75,7 +75,8 @@ def doctor(root, environment_provider=None):
         result['tasks'] = [{'name': r.get('name'), 'exists': r.get('exists'),
                             'enabled': r.get('enabled'), 'state': r.get('state')} for r in rows]
         result['tasks_readable'] = bool(snapshot.get('ok'))
-        expected = {'QmtIPO3-Cycle','QmtIPO3-Notify','QmtIPO3-Monitor','QmtIPO3-Backup'}
+        from instance_identity import task_names
+        expected = set(task_names(config))
         if not snapshot.get('ok') or len(rows)!=4 or {r.get('name') for r in rows}!=expected or not all(r.get('exists') for r in rows):
             result.update(ok=False, code='task_definitions_unavailable', next_action='review_installation')
         else:

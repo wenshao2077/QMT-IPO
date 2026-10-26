@@ -30,6 +30,25 @@ $legacy=[pscustomobject]@{Actions=@([pscustomobject]@{
     Execute=(Join-Path $env:SystemRoot 'System32/wscript.exe');WorkingDirectory=$root;
     Arguments=('//B "'+(Join-Path $root 'hidden.vbs')+'" "'+(Join-Path $root 'run_scheduled.ps1')+'" cycle')})}
 Assert-IpoOwnedTask $legacy $root 'cycle'
+$namespaceRoot=Join-Path ([IO.Path]::GetTempPath()) ('qmt-ipo-namespace-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $namespaceRoot|Out-Null
+try{
+    $namespaceConfig=Join-Path $namespaceRoot 'config.json'
+    [IO.File]::WriteAllText($namespaceConfig,'{"task_prefix":"QmtIPO-Oriental"}',[Text.UTF8Encoding]::new($false))
+    $other=@(New-IpoTaskDefinitions -Root $namespaceRoot -User $user)
+    if($other.Count -ne 4 -or @($other|Where-Object {$_.Name -notlike 'QmtIPO-Oriental-*'}).Count){throw 'Independent namespace missing'}
+    $specs=Get-IpoTaskSpecs $namespaceRoot
+    foreach($def in $other){
+        if($def.Task.Settings.Enabled){throw 'Independent tasks unexpectedly enabled'}
+        Assert-IpoOwnedTask $def.Task $namespaceRoot $specs[$def.Name]
+        $rejected=$false
+        try{Assert-IpoOwnedTask $def.Task $root $specs[$def.Name]}catch{$rejected=$true}
+        if(-not $rejected){throw 'Cross-installation task accepted'}
+    }
+}finally{
+    Remove-Item -LiteralPath $namespaceConfig
+    Remove-Item -LiteralPath $namespaceRoot
+}
 $script:count=0
 foreach($path in Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -Recurse){
     $tokens=$null;$errors=$null

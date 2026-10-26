@@ -5,7 +5,10 @@ $Root=[IO.Path]::GetFullPath($Root)
 if($Root.Contains('"')){throw 'Unsupported root quoting characters'}
 $pythonw=Join-Path $Root '.venv/Scripts/pythonw.exe'
 if(-not (Test-Path -LiteralPath $pythonw)){throw 'Install the isolated Python environment first'}
-$linkPath=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'QMT IPO Console.lnk'
+. (Join-Path $PSScriptRoot 'task_identity.ps1')
+$prefix=Get-IpoTaskPrefix $Root
+$label=if($prefix -eq 'QmtIPO3'){'QMT IPO Console'}else{'QMT IPO '+$prefix}
+$linkPath=Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) ($label+'.lnk')
 $shell=New-Object -ComObject WScript.Shell
 if(Test-Path -LiteralPath $linkPath){
     $previous=$shell.CreateShortcut($linkPath)

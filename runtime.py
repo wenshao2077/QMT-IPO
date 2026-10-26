@@ -58,6 +58,17 @@ def backup(source,target):
 
 
 def validate_config_shape(config):
+    from instance_identity import task_prefix, display_label
+    task_prefix(config)
+    display_label(config)
+    if config.get('transport', 'xtquant') not in ('xtquant', 'native'):
+        raise ValueError('Unknown broker transport')
+    if config.get('transport') == 'native':
+        if not isinstance(config.get('native_bridge_dir'), str) or not Path(config['native_bridge_dir']).is_absolute():
+            raise ValueError('Explicit absolute native bridge directory required')
+        bridge = Path(config['native_bridge_dir']).resolve()
+        if bridge == Path(config['state_dir']).resolve() or bridge in Path(config['state_dir']).resolve().parents:
+            raise ValueError('Bridge spool must be separate from the order ledger')
     for key in ('account_id','qmt_userdata','state_dir','control_dir','webhook_file'):
         if not isinstance(config.get(key),str) or not config[key].strip():
             raise ValueError('Missing required setting: '+key)

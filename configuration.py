@@ -16,6 +16,7 @@ import uuid
 from runtime import atomic_json, read_json, single_instance, validate_config
 from support import wecom_sender
 from client_binding import validate_userdata
+from instance_identity import task_names, mutex_name
 
 TASK_NAMES = ('QmtIPO3-Cycle', 'QmtIPO3-Notify', 'QmtIPO3-Monitor', 'QmtIPO3-Backup')
 
@@ -25,7 +26,7 @@ class ConfigurationError(ValueError):
 
 
 @contextmanager
-def control_mutex():
+def control_mutex(root=None):
     if sys.platform != 'win32':
         raise ConfigurationError('windows_required')
     from ctypes import wintypes
@@ -36,7 +37,7 @@ def control_mutex():
     kernel.WaitForSingleObject.restype = wintypes.DWORD
     kernel.ReleaseMutex.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    handle = kernel.CreateMutexW(None, False, 'Local\\QmtIpoPanelControl')
+    handle = kernel.CreateMutexW(None, False, mutex_name(root))
     if not handle:
         raise ConfigurationError('control_lock_unavailable')
     locked = False
@@ -56,7 +57,7 @@ def _snapshot(root):
     return WindowsController(root).call('Snapshot')
 
 
-def require_disabled_tasks(snapshot):
+def require_disabled_tasks(snapshot, config=None):
     if not isinstance(snapshot, dict) or snapshot.get('ok') is not True:
         raise ConfigurationError('task_state_unavailable')
     if snapshot.get('execution_enabled') is not False:
@@ -65,7 +66,8 @@ def require_disabled_tasks(snapshot):
     if not isinstance(rows, list):
         raise ConfigurationError('task_state_unavailable')
     tasks = {row.get('name'): row for row in rows if isinstance(row, dict)}
-    if len(rows) != len(TASK_NAMES) or set(tasks) != set(TASK_NAMES):
+    expected = task_names(config)
+    if len(rows) != len(expected) or set(tasks) != set(expected):
         raise ConfigurationError('task_definitions_incomplete')
     for row in tasks.values():
         if row.get('exists') is not True or row.get('enabled') is not False:
@@ -127,7 +129,7 @@ def save_first_use(root, *, account_id, qmt_userdata, allowed_markets, webhook=N
     """
     root = Path(root).resolve()
     task_snapshot = _snapshot if task_snapshot is None else task_snapshot
-    mutex_factory = control_mutex if mutex_factory is None else mutex_factory
+    mutex_factory = (lambda: control_mutex(root)) if mutex_factory is None else mutex_factory
     try:
         config = validate_config(read_json(root/'config.json'))
     except (OSError, ValueError, TypeError, KeyError) as exc:
@@ -167,7 +169,7 @@ def save_first_use(root, *, account_id, qmt_userdata, allowed_markets, webhook=N
         if current != config or hook_path.read_bytes() != old_hook:
             raise ConfigurationError('configuration_changed_retry')
         _first_use(root, current)
-        require_disabled_tasks(task_snapshot(root))
+        require_disabled_tasks(task_snapshot(root), config)
         before = (root/'config.json').read_bytes()
         new_hook = hook_text.encode('utf-8') if webhook is not None else old_hook
         new_config = json.dumps(candidate, ensure_ascii=False, indent=2).encode('utf-8')

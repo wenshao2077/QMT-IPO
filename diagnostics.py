@@ -25,7 +25,13 @@ def configuration_report(config, check_environment=True):
         issues.append('account_not_configured')
     binding = None
     try:
-        binding = binding_report(config['qmt_userdata'])
+        if config.get('transport') == 'native':
+            bridge = Path(config['native_bridge_dir'])
+            if not bridge.is_dir() or bridge.is_symlink():
+                raise ValueError('native_bridge_missing')
+            binding = {'transport': 'native', 'selection': 'explicit_configuration', 'automatic_fallback': False}
+        else:
+            binding = binding_report(config['qmt_userdata'])
     except (ValueError, TypeError):
         issues.append('mini_qmt_userdata_missing')
     try:

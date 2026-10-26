@@ -38,8 +38,10 @@ def encode_card(card):
 
 
 def validate_card(card):
-    if not isinstance(card, dict) or set(card) != {'day', 'items', 'page', 'pages'}:
+    if not isinstance(card, dict) or set(card)-{'broker_label'} != {'day', 'items', 'page', 'pages'}:
         raise ValueError('Invalid card')
+    if 'broker_label' in card and (not isinstance(card['broker_label'],str) or not 1 <= len(card['broker_label']) <= 16 or any(c in card['broker_label'] for c in ('\r','\n','\x00'))):
+        raise ValueError('Invalid broker label')
     date.fromisoformat(card['day'])
     if (type(card['page']) is not int or type(card['pages']) is not int
             or not 1 <= card['page'] <= card['pages'] <= 100):
@@ -68,6 +70,7 @@ def render_png(card):
                   'success': '申购成功', 'empty': '今日未申购',
                   'empty_detail': '没有已受理的新股或可转债申购',
                   'footer': '申购结果 · 非中签结果'}
+        if card.get('broker_label'):labels['title']=card['broker_label']+' · 今日打新'
         spec.write_text(json.dumps(dict(card, labels=labels), ensure_ascii=False), encoding='utf-8')
         subprocess.run([str(powershell), '-NoProfile', '-NonInteractive', '-File', str(script),
                         '-InputJson', str(spec), '-OutputPng', str(output)],

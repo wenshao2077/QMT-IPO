@@ -1,6 +1,6 @@
 # Public human/AI entry. No account, Webhook, live, enable or notification parameters.
 param(
-    [ValidateSet('Plan','Doctor','VerifyPackage','New','ResumeNew','Configure','Upgrade','Rollback','Health','RecoveryPlan','ExportSupport','CalendarCoverage','VerifyArchive','RebindClient')][string]$Operation='Plan',
+    [ValidateSet('Plan','Doctor','VerifyPackage','New','ResumeNew','Configure','Upgrade','Rollback','Health','RecoveryPlan','ExportSupport','CalendarCoverage','VerifyArchive','RebindClient','PrepareNative')][string]$Operation='Plan',
     [string]$Root,
     [string]$PythonExe='py',
     [switch]$InstallDependencies,
@@ -12,7 +12,10 @@ param(
     [string]$Archive,
     [string]$ExpectedSha256,
     [string]$QmtUserdata,
-    [switch]$ConfirmRebind
+    [switch]$ConfirmRebind,
+    [string]$TaskPrefix,
+    [ValidateSet('xtquant','native')][string]$Transport,
+    [switch]$ConfirmPrepare
 )
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
@@ -45,8 +48,12 @@ try{
     if(($Archive -or $ExpectedSha256) -and $Operation -ne 'VerifyArchive'){throw 'archive_parameters_only_for_VerifyArchive'}
     if($Operation -eq 'VerifyArchive' -and -not $Archive){throw 'archive_required'}
     if($Root){$Root=[IO.Path]::GetFullPath($Root)}
+    if($TaskPrefix -and $Operation -notin @('New','ResumeNew')){throw 'task_prefix_only_for_new'}
     if($Operation -eq 'RebindClient' -and (-not $QmtUserdata -or -not $ConfirmRebind)){throw 'explicit_rebind_arguments_required'}
     if(($QmtUserdata -or $ConfirmRebind) -and $Operation -ne 'RebindClient'){throw 'rebind_arguments_not_applicable'}
+    if($Transport -and $Operation -ne 'RebindClient'){throw 'transport_only_for_rebind'}
+    if($Operation -eq 'PrepareNative' -and -not $ConfirmPrepare){throw 'explicit_native_preparation_required'}
+    if($ConfirmPrepare -and $Operation -ne 'PrepareNative'){throw 'prepare_confirmation_not_applicable'}
     if($InstallDependencies -and $Operation -notin @('New','ResumeNew')){throw 'dependency_install_only_for_new_or_resume'}
     if($Wheelhouse -and ($Operation -notin @('New','ResumeNew') -or -not $InstallDependencies)){throw 'wheelhouse_only_for_dependency_install'}
     if($RollbackId -and $Operation -ne 'Rollback'){throw 'rollback_id_only_for_rollback'}
@@ -63,6 +70,7 @@ try{
         if($InstallDependencies){$a+='-InstallDependencies'}
         if($Wheelhouse){$a+=@('-Wheelhouse',$Wheelhouse)}
         if($RollbackId){$a+=@('-RollbackId',$RollbackId)}
+        if($TaskPrefix){$a+=@('-TaskPrefix',$TaskPrefix)}
         $log=[IO.Path]::GetTempFileName()
         # PS5.1 redirection defaults to UTF-16; choose UTF-8 explicitly for receipts.
         $savedPreference=$ErrorActionPreference
@@ -83,10 +91,18 @@ try{
             if($result.code -eq 'installed_disabled'){$result.new_install_default_execution=$false}
         }
         if($Operation -in @('Upgrade','Rollback')){$result.activation_policy='preserve_original_switches_not_automatic_activation'}
+    }elseif($Operation -eq 'PrepareNative'){
+        $script=Join-Path $source 'prepare_native.py'
+        if(-not (Test-Path -LiteralPath $script)){$script=Join-Path $source 'code/prepare_native.py'}
+        $text=& $python @pyArgs -B $script --root $Root --confirm-prepare
+        $exitCode=$LASTEXITCODE
+        $result=($text -join "`n")|ConvertFrom-Json
     }elseif($Operation -eq 'RebindClient'){
         $script=Join-Path $source 'rebind_client.py'
         if(-not (Test-Path -LiteralPath $script)){$script=Join-Path $source 'code/rebind_client.py'}
-        $text=& $python @pyArgs -B $script --root $Root --qmt-userdata $QmtUserdata --confirm-rebind
+        $rebindArgs=@('-B',$script,'--root',$Root,'--qmt-userdata',$QmtUserdata,'--confirm-rebind')
+        if($Transport){$rebindArgs+=@('--transport',$Transport)}
+        $text=& $python @pyArgs @rebindArgs
         $exitCode=$LASTEXITCODE
         $result=($text -join "`n")|ConvertFrom-Json
     }elseif($Operation -eq 'Configure'){

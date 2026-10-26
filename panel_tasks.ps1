@@ -7,7 +7,10 @@ param(
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=[Text.Encoding]::UTF8
-$newNames=@('QmtIPO3-Cycle','QmtIPO3-Notify','QmtIPO3-Monitor','QmtIPO3-Backup')
+. (Join-Path $Root 'task_identity.ps1')
+$prefix=Get-IpoTaskPrefix $Root
+$specs=Get-IpoTaskSpecs $Root
+$newNames=@('Cycle','Notify','Monitor','Backup'|ForEach-Object {$prefix+'-'+$_})
 $oldNames=@() # Never manage another/legacy installation by a name wildcard.
 $allNames=$newNames+$oldNames
 $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
@@ -25,7 +28,7 @@ function Get-OwnedTasks {
     foreach($name in $allNames){
         $task=Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
         if($task){
-            $action=@{'QmtIPO3-Cycle'='cycle';'QmtIPO3-Notify'='notify';'QmtIPO3-Monitor'='monitor';'QmtIPO3-Backup'='backup'}[$name]
+            $action=$specs[$name]
             Assert-IpoOwnedTask $task $Root $action
             $result[$name]=$task
         }
@@ -53,13 +56,15 @@ function Get-PanelSnapshot {
                 next_run=$info.NextRunTime.ToString('o');last_run=$info.LastRunTime.ToString('o');last_result=$info.LastTaskResult;can_manage=(Test-OwnerWrite $name)}
         }elseif($name -in $newNames){[pscustomobject]@{name=$name;exists=$false;enabled=$false;state='Missing';can_manage=$false}}
     })
-    $qmtProcesses=@(Get-Process -Name XtMiniQmt,miniquote -ErrorAction SilentlyContinue|Select-Object -ExpandProperty ProcessName)
+    $qmtRoot=Split-Path -Parent $config.qmt_userdata
+    $qmtProcesses=@(Get-CimInstance Win32_Process -Filter "Name='XtMiniQmt.exe' OR Name='XtItClient.exe' OR Name='miniquote.exe'"|Where-Object {$_.ExecutablePath -and (Convert-IpoPath $_.ExecutablePath).StartsWith((Convert-IpoPath $qmtRoot)+'\',[StringComparison]::OrdinalIgnoreCase)}|Select-Object -ExpandProperty Name)
     $account=[string]$config.account_id
     $tail=if($account.Length -gt 4){$account.Substring($account.Length-4)}else{'未配置'}
     return @{ok=$true;checked_at=(Get-Date).ToString('o');execution_enabled=[bool]$config.enable_execution;
         tasks=$rows;needs_admin=(@($rows|Where-Object {-not $_.can_manage}).Count -gt 0);
         account_tail=$tail;markets=@($config.allowed_markets);qmt_path=$config.qmt_userdata;
-        qmt_process_present=($qmtProcesses -contains 'XtMiniQmt');quote_process_present=($qmtProcesses -contains 'miniquote');
+        task_prefix=$prefix;transport=$(if($config.transport){$config.transport}else{'xtquant'});
+        qmt_process_present=($qmtProcesses -contains 'XtMiniQmt.exe' -or $qmtProcesses -contains 'XtItClient.exe');quote_process_present=($qmtProcesses -contains 'miniquote.exe');
         webhook_configured=(Test-Path -LiteralPath $config.webhook_file);state_dir=$config.state_dir;control_dir=$config.control_dir}
 }
 
@@ -92,7 +97,8 @@ try {
     if($Operation -in @('Enable','Pause') -and -not $Consent){throw 'Human button confirmation is required'}
     New-Item -ItemType Directory -Path (Join-Path $control 'panel-actions') -Force|Out-Null
     $receiptPath=Join-Path $control ('panel-actions/'+$RequestId+'.json')
-    $mutex=[Threading.Mutex]::new($false,'Local\QmtIpoPanelControl')
+    $mutexName='Local\QmtIpoPanelControl'+$(if($prefix -ne 'QmtIPO3'){'-'+$prefix}else{''})
+    $mutex=[Threading.Mutex]::new($false,$mutexName)
     try{$locked=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$locked=$true}
     if(-not $locked){throw 'Another control operation is in progress'}
     $before=Get-PanelSnapshot
@@ -126,9 +132,9 @@ try {
             try {
                 Save-JsonAtomic $configPath $config
                 foreach($name in $oldNames){if($tasks.ContainsKey($name)){Disable-ScheduledTask -TaskName $name|Out-Null}}
-                foreach($name in @('QmtIPO3-Notify','QmtIPO3-Monitor','QmtIPO3-Backup','QmtIPO3-Cycle')){
+                foreach($name in @('Notify','Monitor','Backup','Cycle'|ForEach-Object {$prefix+'-'+$_})){
                     Enable-ScheduledTask -TaskName $name|Out-Null
-                    if($name -eq 'QmtIPO3-Cycle'){$cycleEnabled=$true}
+                    if($name -eq ($prefix+'-Cycle')){$cycleEnabled=$true}
                 }
             }catch{
                 if(-not $cycleEnabled){
@@ -143,13 +149,13 @@ try {
             Save-JsonAtomic (Join-Path $control 'panel-authorization.json') @{authorized=$true;time=(Get-Date).ToString('o');scope='daily_stock_and_bond_ipo';source='owner_gui_button';consent_version=1}
         }else{
             # Stop future dispatches; do not kill an in-flight worker or cancel orders.
-            Disable-ScheduledTask -TaskName 'QmtIPO3-Cycle'|Out-Null
+            Disable-ScheduledTask -TaskName ($prefix+'-Cycle')|Out-Null
             $config.enable_execution=$false
             Save-JsonAtomic $configPath $config
             Save-JsonAtomic (Join-Path $control 'panel-authorization.json') @{authorized=$false;time=(Get-Date).ToString('o');source='owner_gui_button';consent_version=1}
         }
         $after=Get-PanelSnapshot
-        $cycle=@($after.tasks|Where-Object name -eq 'QmtIPO3-Cycle')[0]
+        $cycle=@($after.tasks|Where-Object name -eq ($prefix+'-Cycle'))[0]
         if($Operation -eq 'Enable' -and (-not $after.execution_enabled -or -not $cycle.enabled)){throw 'Enable readback did not match requested state'}
         if($Operation -eq 'Pause' -and ($after.execution_enabled -or $cycle.enabled)){throw 'Pause readback did not match requested state'}
     }

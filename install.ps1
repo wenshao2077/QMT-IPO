@@ -6,7 +6,8 @@ param(
     [string]$PythonExe='py',
     [switch]$InstallDependencies,
     [string]$Wheelhouse,
-    [string]$RollbackId
+    [string]$RollbackId,
+    [string]$TaskPrefix
 )
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
@@ -18,7 +19,7 @@ if($Wheelhouse -and ($Mode -notin @('New','ResumeNew') -or -not $InstallDependen
 if($Root -eq $SourceRoot){throw 'Source and installation must be separate directories'}
 if($Root.Contains('"')){throw 'Unsupported root quoting characters'}
 . (Join-Path $SourceRoot 'task_identity.ps1')
-$specs=@{ 'QmtIPO3-Cycle'='cycle'; 'QmtIPO3-Notify'='notify'; 'QmtIPO3-Monitor'='monitor'; 'QmtIPO3-Backup'='backup' }
+$specs=Get-IpoTaskSpecs $Root
 $python=Join-Path $Root '.venv/Scripts/python.exe'
 if($Mode -in @('New','ResumeNew')){
     # Serialize two human/AI installers for the same destination. No worker is killed.
@@ -95,6 +96,11 @@ if($Mode -in @('New','ResumeNew')){
             & $python -B (Join-Path $SourceRoot 'environment_check.py')
             if($LASTEXITCODE -ne 0){throw 'Runtime changed after checkpoint; review before resuming'}
         }
+        if($TaskPrefix){
+            & $python -B -c "import sys;sys.path.insert(0,sys.argv[1]);from instance_identity import initialize_prefix;initialize_prefix(sys.argv[2],sys.argv[3])" $SourceRoot $Root $TaskPrefix
+            if($LASTEXITCODE -ne 0){throw 'NEW namespace binding failed; preserve the installation'}
+        }
+        $specs=Get-IpoTaskSpecs $Root
         . (Join-Path $SourceRoot 'tasks.ps1')
         $user=[Security.Principal.WindowsIdentity]::GetCurrent().Name
         foreach($def in @(New-IpoTaskDefinitions -Root $Root -User $user)){
