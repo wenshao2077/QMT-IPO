@@ -138,6 +138,8 @@ class Coordinator:
                     if label:card['broker_label']=label
                     for item in card['items']:
                         item['name']=redact(item['name'],self.config)[:80]
+                        if 'detail' in item:
+                            item['detail']=redact(item['detail'],self.config)[:180]
                     # Normalized display identity: REPORTED -> CONFIRMED is not
                     # another successful subscription and must not resend a card.
                     fingerprint=hashlib.sha256(encode_card(card).encode()).hexdigest()[:16]

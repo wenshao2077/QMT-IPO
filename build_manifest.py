@@ -47,6 +47,7 @@ SOURCE_FILES = (
     'docs/20260928收盘核对修复.md',
     'docs/20261020已确认状态识别修复.md',
     'docs/20261020图片通知升级.md',
+    'docs/20261027项目结果图片通知.md',
     'test_final_delivery.py',
     'calendar_health.py',
     'calendar_tool.py',

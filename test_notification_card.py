@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from notification_card import PREFIX, encode_card, image_payload, render_png, result_cards
+from notification_card import PREFIX, STATUS_LABELS, encode_card, image_payload, render_png, result_cards, validate_card
 from support import Store, wecom_sender
 import test_system as fixtures
 from test_system import OPEN, info
@@ -29,18 +29,44 @@ class CardTests(unittest.TestCase):
         for forbidden in ('quantity', 'order_id', '天元重工', 'SKIPPED_SCOPE', 'account'):
             self.assertNotIn(forbidden, content)
 
-    def test_pending_rejected_quota_and_errors_never_become_success(self):
-        for status in ('PENDING', 'SUBMITTED', 'UNCERTAIN', 'PARTIAL', 'REJECTED', 'CANCELED', 'SKIPPED_QUOTA'):
+    def test_business_attention_has_explicit_status_never_success(self):
+        for status in STATUS_LABELS.keys()-{'BROKER_ERROR'}:
             doc = document()
+            doc['completed'] = False
             doc['items']['371018.SZ']['status'] = status
             with self.subTest(status=status):
-                self.assertIsNone(result_cards(doc))
+                card = result_cards(doc)[0]
+                self.assertEqual(card['items'][0]['status'], status)
+                validate_card(card)
+                self.assertNotIn('申购成功', encode_card(card))
+
+    def test_system_errors_unknown_status_and_incomplete_empty_stay_text(self):
         doc = document()
         doc['errors'] = ['query failed']
         self.assertIsNone(result_cards(doc))
         doc = document()
-        doc['items']['371018.SZ']['broker_error'] = 'broker rejected request'
+        doc['items']['371018.SZ']['status'] = 'FUTURE_UNKNOWN'
         self.assertIsNone(result_cards(doc))
+        self.assertIsNone(result_cards({'day': '2026-10-27', 'items': {}, 'completed': False}))
+        doc = document()
+        doc['items']['371018.SZ'].update(status='PENDING', broker_status_code=255)
+        self.assertIsNone(result_cards(doc))
+
+    def test_broker_error_and_mixed_results_keep_attention_detail(self):
+        doc = document()
+        doc['items']['371018.SZ']['broker_error'] = 'broker rejected request'
+        doc['items']['301111.SZ'] = dict(code='301111.SZ', name='正常新股', kind='STOCK', status='REPORTED')
+        rows = result_cards(doc)[0]['items']
+        self.assertNotIn('status', rows[0])
+        self.assertEqual(rows[1]['status'], 'BROKER_ERROR')
+        self.assertEqual(rows[1]['detail'], 'broker rejected request')
+
+    def test_legacy_success_payload_and_invalid_status_validation(self):
+        card = result_cards(document())[0]
+        self.assertEqual(set(card['items'][0]), {'code', 'name', 'kind'})
+        for status in ('REPORTED', 'UNKNOWN'):
+            card['items'][0]['status'] = status
+            with self.assertRaises(ValueError): validate_card(card)
 
     def test_empty_and_multiple_pages_keep_all_names(self):
         doc = document()
@@ -96,6 +122,14 @@ class CardTests(unittest.TestCase):
         self.assertTrue(png.startswith(b'\x89PNG\r\n\x1a\n'))
         self.assertLess(len(png), 2*1024*1024)
 
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows GDI renderer')
+    def test_actual_rejected_png_renderer(self):
+        doc = document()
+        doc['completed'] = False
+        doc['items']['371018.SZ'].update(status='REJECTED', broker_error='券商废单，请核对')
+        card = dict(result_cards(doc)[0], broker_label='东方证券')
+        self.assertTrue(render_png(card).startswith(b'\x89PNG\r\n\x1a\n'))
+
 
 class CardBusinessTests(unittest.TestCase):
     # Reuse the synthetic fixture, not its entire test suite.
@@ -115,11 +149,25 @@ class CardBusinessTests(unittest.TestCase):
         self.assertNotIn('天元重工', contents[0])
         self.assertEqual(len(self.broker.calls), 1)
 
-    def test_pending_uses_error_text_and_excludes_disabled_market(self):
+    def test_pending_uses_attention_image_and_excludes_disabled_market(self):
         self.broker.items = {'371018.SZ': info('BOND'), '920306.BJ': info()}
         self.broker.publish = False
         self.run_cycle()
         contents = [r[0] for r in self.ledger.db.execute('SELECT content FROM outbox')]
         self.assertTrue(contents)
-        self.assertTrue(all(not c.startswith(PREFIX) for c in contents))
+        self.assertTrue(all(c.startswith(PREFIX) for c in contents))
+        self.assertIn('SUBMITTED', '\n'.join(contents))
         self.assertNotIn('天元重工', '\n'.join(contents))
+
+    def test_rejected_repeat_only_notifies_changed_result_never_resubmits(self):
+        self.broker.items = {'371018.SZ': info('BOND')}
+        self.run_cycle()
+        self.broker.order_rows[0]['status'] = 'rejected'
+        self.clock = OPEN.replace(hour=15, minute=5)
+        self.run_cycle()
+        self.run_cycle()
+        contents = [r[0] for r in self.ledger.db.execute('SELECT content FROM outbox')]
+        cards = [json.loads(c[len(PREFIX):]) for c in contents if c.startswith(PREFIX)]
+        self.assertEqual(len(cards), 2)
+        self.assertEqual(cards[-1]['items'][0]['status'], 'REJECTED')
+        self.assertEqual(len(self.broker.calls), 1)

@@ -3,7 +3,8 @@ $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Drawing
 $card=[IO.File]::ReadAllText($InputJson,[Text.Encoding]::UTF8)|ConvertFrom-Json
 $rows=@($card.items)
-$height=300+[Math]::Max(1,$rows.Count)*156
+$rowHeight=if(@($rows|Where-Object {$_.detail}).Count -gt 0){194}else{156}
+$height=300+[Math]::Max(1,$rows.Count)*$rowHeight
 $bitmap=New-Object Drawing.Bitmap(1080,$height)
 $g=[Drawing.Graphics]::FromImage($bitmap)
 $g.SmoothingMode='AntiAlias'
@@ -26,21 +27,27 @@ try{
         Text $card.labels.empty_detail 25 60 300 '#6C7B8A'
     }else{
         foreach($row in $rows){
-            $g.FillRectangle((Brush '#FFFFFF'),40,$y,1000,136)
+            $g.FillRectangle((Brush '#FFFFFF'),40,$y,1000,($rowHeight-20))
             $kind=if($row.kind -eq 'BOND'){$card.labels.bond}else{$card.labels.stock}
             $accent=if($row.kind -eq 'BOND'){'#B56B24'}else{'#356DA5'}
             Text $kind 23 64 ($y+17) $accent $true
             $name=[string]$row.name
             $font=Font 38 $true
-            $rect=New-Object Drawing.RectangleF(62,($y+56),650,58)
+            $rect=New-Object Drawing.RectangleF(62,($y+56),590,58)
             $format=New-Object Drawing.StringFormat
             $owned.Add($format)
             $format.Trimming=[Drawing.StringTrimming]::EllipsisCharacter
             $format.FormatFlags=[Drawing.StringFormatFlags]::NoWrap
             $g.DrawString($name,$font,(Brush '#20364B'),$rect,$format)
-            $g.FillEllipse((Brush '#16836F'),790,($y+49),10,10)
-            Text $card.labels.success 30 814 ($y+35) '#16836F' $true
-            $y+=156
+            $color=[string]$row.status_color
+            $g.FillEllipse((Brush $color),672,($y+54),10,10)
+            $statusRect=New-Object Drawing.RectangleF(696,($y+39),328,65)
+            $g.DrawString([string]$row.status_label,(Font 27 $true),(Brush $color),$statusRect,$format)
+            if($row.detail){
+                $detailRect=New-Object Drawing.RectangleF(64,($y+121),940,40)
+                $g.DrawString([string]$row.detail,(Font 22),(Brush '#6C7B8A'),$detailRect,$format)
+            }
+            $y+=$rowHeight
         }
     }
     Text $card.labels.footer 22 58 ($height-59) '#81909F'
