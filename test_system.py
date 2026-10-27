@@ -221,6 +221,99 @@ class DailySystemTests(unittest.TestCase):
         self.assertEqual(self.run_cycle()['phase'],'final_attention')
         self.assertEqual(len(self.broker.calls),1)
 
+    def external_recovery_orders(self):
+        self.run_cycle()  # Synthetic first submission only.
+        self.broker.order_rows[0].update(status='rejected',raw_status=57)
+        self.broker.order_rows.append(dict(code='301111.SZ',day=DATE,status='confirmed',
+                                          raw_status=86,order_id=999,remark=''))
+        self.clock=OPEN.replace(hour=15,minute=5)
+
+    def test_external_acceptance_completes_day_but_preserves_original_failed_intent(self):
+        self.external_recovery_orders()
+        result=self.run_cycle()
+        item=result['items']['301111.SZ']
+        self.assertTrue(result['completed'])
+        self.assertEqual(item['status'],'EXTERNAL_ACCEPTED')
+        self.assertEqual(item['program_order'],dict(status='REJECTED',order_id=101,broker_status_code=57))
+        self.assertEqual(item['external_acceptance']['orders'][0]['order_id'],999)
+        self.assertEqual(item['broker_status_code'],86)
+        self.assertEqual(self.ledger.get(result['account_digest'],DATE,'301111.SZ')['state'],'REJECTED')
+        self.assertEqual(self.ledger.get(result['account_digest'],DATE,'301111.SZ')['order_id'],101)
+        self.assertNotIn('daily_work_incomplete',inspect_health(self.cfg,self.clock)['issues'])
+        self.assertNotIn('closeout_failed',inspect_health(self.cfg,self.clock)['issues'])
+        self.assertEqual(len(self.broker.calls),1)
+
+    def test_external_nonaccepted_or_other_security_never_clears_failed_item(self):
+        self.external_recovery_orders()
+        external=self.broker.order_rows[1]
+        for status in ('pending','partial','rejected','canceled','unknown'):
+            external['status']=status
+            result=self.run_cycle()
+            self.assertFalse(result['completed'])
+            self.assertEqual(result['items']['301111.SZ']['status'],'REJECTED')
+        external.update(status='confirmed',code='301222.SZ')
+        self.assertFalse(self.run_cycle()['completed'])
+        self.assertEqual(len(self.broker.calls),1)
+
+    def test_external_acceptance_is_rechecked_after_cancel_disappearance_or_query_failure(self):
+        self.external_recovery_orders()
+        self.assertTrue(self.run_cycle()['completed'])
+        self.broker.order_rows[1]['status']='canceled'
+        result=self.run_cycle()
+        self.assertFalse(result['completed'])
+        self.assertNotIn('external_acceptance',result['items']['301111.SZ'])
+        self.broker.order_rows[1]['status']='confirmed'
+        self.assertTrue(self.run_cycle()['completed'])
+        self.broker.order_rows.pop()
+        self.assertFalse(self.run_cycle()['completed'])
+        self.broker.query_error=True
+        self.assertFalse(self.run_cycle()['completed'])
+        self.assertEqual(len(self.broker.calls),1)
+
+    def test_external_wrong_date_fails_query_and_does_not_claim_complete(self):
+        self.external_recovery_orders()
+        self.broker.order_rows[1]['day']='2026-09-08'
+        result=self.run_cycle()
+        self.assertFalse(result['completed'])
+        self.assertEqual(result['last_activity']['outcome'],'query_error')
+        self.assertEqual(len(self.broker.calls),1)
+
+    def test_external_acceptance_does_not_resolve_unproven_original_order(self):
+        self.external_recovery_orders()
+        for state in ('pending','partial','unknown'):
+            self.broker.order_rows[0]['status']=state
+            result=self.run_cycle()
+            self.assertFalse(result['completed'])
+            self.assertNotEqual(result['items']['301111.SZ']['status'],'EXTERNAL_ACCEPTED')
+        self.assertEqual(len(self.broker.calls),1)
+
+    def test_original_broker_error_is_kept_separate_from_success_image(self):
+        self.external_recovery_orders()
+        self.broker.drain_errors=lambda:[dict(id=101,message='original permission error')]
+        result=self.run_cycle()
+        item=result['items']['301111.SZ']
+        self.assertTrue(result['completed'])
+        self.assertEqual(item['program_order']['broker_error'],'original permission error')
+        self.assertNotIn('broker_error',item)
+        from notification_card import result_cards
+        self.assertNotIn('status',result_cards(result)[0]['items'][0])
+        self.broker.drain_errors=lambda:[]
+        self.broker.order_rows[1]['status']='canceled'
+        result=self.run_cycle()
+        self.assertEqual(result['items']['301111.SZ']['broker_error'],'original permission error')
+        self.assertFalse(result['completed'])
+        self.assertEqual(len(self.broker.calls),1)
+
+    def test_external_reported_to_confirmed_keeps_single_success_notice(self):
+        self.external_recovery_orders()
+        self.broker.order_rows[1].update(status='reported',raw_status=50)
+        self.assertTrue(self.run_cycle()['completed'])
+        count=self.ledger.db.execute('SELECT COUNT(*) FROM outbox').fetchone()[0]
+        self.broker.order_rows[1].update(status='confirmed',raw_status=86)
+        self.assertTrue(self.run_cycle()['completed'])
+        self.assertEqual(self.ledger.db.execute('SELECT COUNT(*) FROM outbox').fetchone()[0],count)
+        self.assertEqual(len(self.broker.calls),1)
+
     def test_two_empty_observations_are_required(self):
         self.broker.items={}
         self.assertEqual(self.run_cycle()['phase'],'waiting_data')

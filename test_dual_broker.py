@@ -329,6 +329,40 @@ class DualTests(unittest.TestCase):
         self.assertEqual(self.ledger.get(account,self.plan.day,self.plan.code)['order_id'],99)
         self.api['passorder'].assert_not_called()
 
+    def test_native_rejected_program_order_and_blank_remark_confirmed_order_complete_without_submission(self):
+        account=hashlib.sha256(self.cfg['account_id'].encode()).hexdigest()[:24]
+        self.ledger.reserve(account,self.plan)
+        self.ledger.record(account,self.plan.day,self.plan.code,'REJECTED')
+        self.passorder(None,None,None,self.plan.code,None,None,None,None,None,self.plan.remark)
+        self.rows[0].m_nOrderStatus=57
+        self.passorder(None,None,None,self.plan.code,None,None,None,None,None,'')
+        self.rows[1].m_nRef=102
+        result=self.cycle()
+        item=result['items'][self.plan.code]
+        self.assertTrue(result['completed'])
+        self.assertEqual(item['status'],'EXTERNAL_ACCEPTED')
+        self.assertEqual(item['program_order']['status'],'REJECTED')
+        self.assertEqual(item['external_acceptance']['orders'][0]['native_reference'],'102')
+        self.assertEqual(self.ledger.get(account,self.plan.day,self.plan.code)['state'],'REJECTED')
+        self.api['passorder'].assert_not_called()
+        self.assertFalse(list((self.root/'native/claims').glob('*.json')))
+        self.cycle()
+        self.api['passorder'].assert_not_called()
+
+    def test_native_ambiguous_original_or_unreadable_remarks_do_not_claim_external_completion(self):
+        account=hashlib.sha256(self.cfg['account_id'].encode()).hexdigest()[:24]
+        self.ledger.reserve(account,self.plan)
+        self.ledger.record(account,self.plan.day,self.plan.code,'UNCERTAIN')
+        for _ in range(2):
+            self.passorder(None,None,None,self.plan.code,None,None,None,None,None,self.plan.remark)
+            self.rows[-1].m_nOrderStatus=57
+        self.passorder(None,None,None,self.plan.code,None,None,None,None,None,'')
+        self.assertFalse(self.cycle()['completed'])
+        self.rows.pop(1)
+        del self.rows[1].m_strRemark
+        self.assertFalse(self.cycle()['completed'])
+        self.api['passorder'].assert_not_called()
+
     def test_instances_have_independent_names_mutexes_and_plan_state(self):
         self.assertNotEqual(task_names(self.cfg),task_names())
         self.assertNotEqual(mutex_name(self.root),mutex_name())

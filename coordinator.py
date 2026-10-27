@@ -97,11 +97,20 @@ class Coordinator:
         return rows
 
     def synchronize(self,orders):
+        externally_completed=[]
         for row in self.ledger.records(self.account):
             if row['day']!=self.day:
                 continue
             code=row['code']
             item=self.doc['items'].setdefault(code,{'code':code,'name':code,'kind':'UNKNOWN','quantity':row['quantity']})
+            # External acceptance is a fresh account-level observation, never a
+            # replacement for the original intent or a sticky success flag.
+            previous=item.pop('external_acceptance',None)
+            original=item.pop('program_order',{})
+            if previous:
+                item.pop('broker_status_code',None)
+            if previous and original.get('broker_error'):
+                item['broker_error']=original['broker_error']
             matches=[o for o in orders if o['code']==code]
             native = self.config.get('transport') == 'native'
             expected=f"IPOv2_{self.day.replace('-','')}_{code}"
@@ -119,6 +128,11 @@ class Coordinator:
                 self.ledger.record(self.account,self.day,code,state,order.get('order_id') or row['order_id'])
                 item.update(status=state,order_id=order.get('order_id'),reason='券商委托查询')
                 item['broker_status_code']=order.get('raw_status')
+                if state in ('REJECTED','CANCELED'):
+                    accepted=[o for o in orders if o is not order and o.get('day')==self.day
+                              and o.get('code')==code and STATUS_MAP.get(o.get('status')) in ACCEPTED]
+                    if accepted:
+                        externally_completed.append((item,accepted))
             else:
                 state='UNCERTAIN' if row['state'] in ACCEPTED else row['state']
                 item.update(status=state,order_id=row['order_id'],reason='已有请求，当前未能唯一核对；不重发')
@@ -127,6 +141,22 @@ class Coordinator:
                 if ((item.get('order_id') and item['order_id']==error.get('id'))
                         or error.get('remark')==f"IPOv2_{self.day.replace('-','')}_{code}"):
                     item['broker_error']=error.get('message','券商错误回报')
+        for item,accepted in externally_completed:
+            # Keep the program order failed in the authoritative intent ledger.
+            # Only the daily outcome/notification is satisfied by another
+            # confirmed broker order. This never reserves or submits anything.
+            original={key:item.get(key) for key in ('status','order_id','broker_status_code')}
+            if item.get('broker_error'):
+                original['broker_error']=item.pop('broker_error')
+            evidence=[{key:o.get(key) for key in
+                       ('order_id','status','raw_status','native_reference','native_system_id')}
+                      for o in accepted]
+            single=accepted[0] if len(accepted)==1 else {}
+            item.update(status='EXTERNAL_ACCEPTED',program_order=original,
+                        external_acceptance={'day':self.day,'code':item['code'],
+                                             'source':'same_day_broker_orders','orders':evidence},
+                        order_id=single.get('order_id'),broker_status_code=single.get('raw_status'),
+                        reason='原程序委托失败已保留；当日同证券另有有效申购委托，不再补报')
 
     def summary(self):
         if self.mode=='live':
