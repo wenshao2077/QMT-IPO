@@ -18,7 +18,7 @@ from coordinator import Coordinator, Ledger, DONE
 from runtime import atomic_json, backup, read_json, single_instance, validate_config, execution_due
 from support import Store, china_now, wecom_sender
 from market_calendar import CalendarService, CLOSED, UNKNOWN, ensure_calendar
-from notification_policy import enqueue_calendar_issue, notification_stats, suppress_closed_alerts
+from notification_policy import enqueue_calendar_issue, notification_stats, suppress_closed_alerts, suppress_routine_status_notices
 from retention import maintain, archive_size_warning
 from calendar_health import coverage_report
 from notification_policy import combined_notification_stats
@@ -97,6 +97,17 @@ def inspect_health(config,now=None):
 
 def watch(config,send=False,now=None):
     now=now or china_now(); root=Path(config['control_dir'])
+    # Remove obsolete recovery notices from backlog accounting before deciding
+    # whether an operator must act. Corruption still gets reported by health.
+    if (root/'monitor.sqlite3').is_file():
+        try:
+            previous_store=Store(root/'monitor.sqlite3')
+            try:
+                suppress_routine_status_notices(previous_store)
+            finally:
+                previous_store.close()
+        except sqlite3.Error:
+            pass
     snapshot=inspect_health(config,now)
     if snapshot['status']=='calendar_unknown':
         enqueue_calendar_issue(config,CalendarService(config).decide(snapshot['day']))
@@ -122,10 +133,11 @@ def watch(config,send=False,now=None):
             text='自动打新异常：'+'；'.join(labels.get(i,i) for i in issues)+'。请查看每日状态；监控未重启、未补单。'
             last=now.timestamp(); alerted=True
         elif not issues and alerted:
-            text='自动打新链路恢复；以每日明细与券商委托状态为准。'
+            # Recovery is internal state, not an actionable notification.
             alerted=False
         atomic_json(statepath,{'issues':issues,'count':count,'alerted':alerted,'last_alert':last,
-                               'last_alert_issues':issues if text and issues else before.get('last_alert_issues')})
+                               'last_alert_issues':[] if not issues else
+                               (issues if text else before.get('last_alert_issues'))})
     # Publish a truthful local snapshot even when the monitor outbox is corrupt.
     atomic_json(root/'health.json',snapshot)
     store=Store(root/'monitor.sqlite3')
@@ -138,6 +150,7 @@ def watch(config,send=False,now=None):
         if text:
             label=display_label(config)
             store.event(f'monitor:{now.date()}:{last}:{bool(issues)}',('【'+label+'】' if label else '')+f'{now:%Y-%m-%d %H:%M}\n{text}')
+        suppress_routine_status_notices(store)
         suppress_closed_alerts(store,config)
         # Closed/unknown days do not discard real result notifications.
         if send and config.get('notification_mode','enabled') == 'enabled' and store.pending_notifications():
@@ -195,6 +208,7 @@ def dispatch(action,config,live=False,send=False,broker_factory=None,now=china_n
                 store=Ledger(shared/'state.sqlite3')
                 try:
                     suppressed=suppress_closed_alerts(store,config)
+                    suppressed+=suppress_routine_status_notices(store)
                     if action=='cycle':
                         decision=ensure_calendar(config,started.date().isoformat(),started)
                         factory=broker_factory or (Broker if live else ReadOnlyBroker)

@@ -1,7 +1,8 @@
 """Conservative outbox suppression, NEVER deletion or fake delivery.
 
-Only pure availability alerts for a proven closed event-date are suppressible.
-Any order intent on that day, ambiguity or unavailable audit ledger keeps them.
+Pure closed-day availability alerts require calendar and ledger proof. Known
+routine recovery notices follow the owner's intervention-only alert preference.
+Ambiguous messages and business results are never suppressed by that preference.
 """
 from datetime import date
 import re
@@ -17,6 +18,25 @@ _CONNECTION = re.compile(_HEADER + r'(\d{4}-\d{2}-\d{2}) 自动打新V3【(?:实
                          r'连接/查询未完成（[A-Za-z_][A-Za-z0-9_]*）；仅未发起过的项目允许后续尝试。\Z')
 _MONITOR = re.compile(_HEADER + r'(\d{4}-\d{2}-\d{2}) \d{2}:\d{2}\n自动打新异常：(.+)。请查看每日状态；监控未重启、未补单。\Z')
 _PURE_AVAILABILITY = {'今日定时任务漏跑', '今日仍有未完成项目', '收盘核对未完成', '今日运行记录缺失'}
+_RECOVERY = re.compile(_HEADER + r'(?:【[^】\r\n\x00]{1,16}】)?\d{4}-\d{2}-\d{2} \d{2}:\d{2}\n'
+                       r'自动打新链路恢复；以每日明细与券商委托状态为准。\Z')
+
+
+def suppress_routine_status_notices(store):
+    """Retain old queued recovery notices as suppressed, never fake delivery."""
+    rows=store.db.execute('''SELECT o.id,o.content FROM outbox o
+        LEFT JOIN notification_suppressions s ON o.id=s.id
+        WHERE o.delivered=0 AND s.id IS NULL AND o.content LIKE '%自动打新链路恢复%' ''').fetchall()
+    count=0
+    for row in rows:
+        if not _RECOVERY.fullmatch(row['content']):
+            continue
+        with store.transaction():
+            count+=store.db.execute('''INSERT OR IGNORE INTO notification_suppressions
+                (id,reason,suppressed_at,calendar_source) VALUES(?,?,?,?)''',
+                (row['id'],'routine_recovery_disabled; original retained; not delivered',
+                 time.time(),'owner_notification_policy')).rowcount
+    return count
 
 
 def suppress_closed_alerts(store, config):

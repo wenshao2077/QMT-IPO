@@ -522,6 +522,83 @@ class DailySystemTests(unittest.TestCase):
         self.cfg['enable_execution']=False
         self.assertEqual(inspect_health(self.cfg,OPEN)['status'],'not_activated')
 
+    def monitor_snapshot(self,issues=()):
+        return dict(status='attention' if issues else 'healthy',day=DATE,issues=list(issues),
+                    calendar={'status':'trading_day'},calendar_coverage={'issue_code':''})
+
+    def test_monitor_recovery_and_repeated_healthy_are_silent_and_reset_alert_state(self):
+        from app import watch
+        atomic_json(self.root/'control/monitor-state.json',
+                    dict(issues=['daily_work_incomplete'],count=3,alerted=True,
+                         last_alert=OPEN.timestamp(),last_alert_issues=['daily_work_incomplete']))
+        with patch('app.inspect_health',return_value=self.monitor_snapshot()), patch('app.wecom_sender') as sender:
+            watch(self.cfg,send=True,now=OPEN.replace(hour=11))
+            watch(self.cfg,send=True,now=OPEN.replace(hour=11,minute=5))
+            sender.assert_not_called()
+        state=json.loads((self.root/'control/monitor-state.json').read_text(encoding='utf-8'))
+        self.assertFalse(state['alerted'])
+        self.assertEqual(state['last_alert_issues'],[])
+        db=sqlite3.connect(self.root/'control/monitor.sqlite3')
+        try:self.assertEqual(db.execute('SELECT COUNT(*) FROM outbox').fetchone()[0],0)
+        finally:db.close()
+
+    def test_monitor_still_alerts_for_new_or_recurring_faults_without_recovery_noise(self):
+        from app import watch
+        for offset,issues in [(0,['daily_work_incomplete']),(1,['daily_work_incomplete']),
+                              (2,[]),(3,['daily_work_incomplete']),(4,['daily_work_incomplete'])]:
+            with patch('app.inspect_health',return_value=self.monitor_snapshot(issues)):
+                watch(self.cfg,send=False,now=OPEN+timedelta(minutes=offset))
+        db=sqlite3.connect(self.root/'control/monitor.sqlite3')
+        try:messages=[r[0] for r in db.execute('SELECT content FROM outbox')]
+        finally:db.close()
+        self.assertEqual(len(messages),2)
+        self.assertTrue(all('自动打新异常' in text and '链路恢复' not in text for text in messages))
+
+    def test_pending_old_recovery_is_suppressed_without_deleting_history_or_problem_messages(self):
+        from notification_policy import suppress_routine_status_notices
+        from notification_card import result_cards
+        for label in ('','【东方证券】'):
+            self.ledger.event('recovery:'+label,label+DATE+' 11:31\n自动打新链路恢复；以每日明细与券商委托状态为准。')
+        self.ledger.event('mixed',DATE+' 11:31\n自动打新链路恢复；但仍有未完成项目，请介入。')
+        self.ledger.image_event('business-result',result_cards(dict(day=DATE,completed=True,items={}))[0])
+        before=[tuple(r) for r in self.ledger.db.execute('SELECT * FROM outbox ORDER BY id')]
+        self.assertEqual(suppress_routine_status_notices(self.ledger),2)
+        self.assertEqual(suppress_routine_status_notices(self.ledger),0)
+        self.assertEqual(before,[tuple(r) for r in self.ledger.db.execute('SELECT * FROM outbox ORDER BY id')])
+        self.assertEqual(self.ledger.pending_notifications(),2)
+        self.assertEqual(self.ledger.db.execute('SELECT COUNT(*) FROM notification_delivery_receipts').fetchone()[0],0)
+
+    def test_notify_skips_old_recovery_without_sending_or_claiming_delivery(self):
+        self.ledger.event('old-recovery','【东方证券】'+DATE+' 11:31\n自动打新链路恢复；以每日明细与券商委托状态为准。')
+        with patch('app.wecom_sender') as sender:
+            result=dispatch('notify',self.cfg,send=True,now=lambda:OPEN.replace(hour=11))
+            sender.assert_not_called()
+        self.assertEqual(result['status'],'finished')
+        self.assertEqual(result['result']['suppressed_this_run'],1)
+        self.assertEqual(result['result']['pending_notifications'],0)
+        self.assertEqual(self.ledger.db.execute('SELECT delivered FROM outbox').fetchone()[0],0)
+
+    def test_failed_old_recovery_does_not_create_a_notification_backlog_alarm(self):
+        from app import watch
+        from notification_policy import notification_stats
+        path=self.root/'control/monitor.sqlite3'
+        store=Store(path)
+        try:
+            store.event('old-recovery',DATE+' 11:31\n自动打新链路恢复；以每日明细与券商委托状态为准。')
+            with store.transaction():store.db.execute('UPDATE outbox SET attempts=2')
+        finally:store.close()
+        atomic_json(self.root/'control/monitor-state.json',
+                    dict(issues=['notification_backlog'],count=3,alerted=True,last_alert=0,
+                         last_alert_issues=['notification_backlog']))
+        def health(*args):
+            return self.monitor_snapshot(['notification_backlog'] if notification_stats(path)['failed'] else [])
+        with patch('app.inspect_health',side_effect=health),patch('app.wecom_sender') as sender:
+            result=watch(self.cfg,send=True,now=OPEN.replace(hour=11))
+            sender.assert_not_called()
+        self.assertEqual(result['issues'],[])
+        self.assertEqual(result['status'],'healthy')
+        self.assertEqual(notification_stats(path)['suppressed'],1)
+
     def test_backup_matches_ledger(self):
         self.run_cycle(); target=self.root/'backup.sqlite3'
         backup(self.root/'shared'/'state.sqlite3',target)
